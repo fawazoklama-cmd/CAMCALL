@@ -1,4 +1,4 @@
-export type StudioView = 'home' | 'photobooth' | 'filters' | 'editor' | 'collage' | 'about';
+export type StudioView = 'home' | 'photobooth' | 'filters' | 'editor' | 'collage' | 'creative' | 'about';
 
 export type FilterCategory =
   | 'All'

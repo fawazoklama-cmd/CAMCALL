@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CollageMaker } from './components/CollageMaker';
+import { CreativeCollectionStudio } from './components/CreativeCollectionStudio';
 import { FilterLibrary } from './components/FilterLibrary';
 import { Footer } from './components/Footer';
 import { HomePage } from './components/HomePage';
@@ -160,6 +161,8 @@ export default function App() {
           )}
 
           {activeView === 'collage' && <CollageMaker onNotify={notify} />}
+
+          {activeView === 'creative' && <CreativeCollectionStudio onNotify={notify} />}
         </div>
 
         {/* Session Saved Creations Shelf (only appears after user saves a creation) */}

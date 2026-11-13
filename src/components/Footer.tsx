@@ -24,6 +24,7 @@ export function Footer({ onNavigate }: FooterProps) {
                 { id: 'filters', label: 'Filters' },
                 { id: 'editor', label: 'Photo Editor' },
                 { id: 'collage', label: 'Collage' },
+                { id: 'creative', label: 'Creative' },
                 { id: 'about', label: 'About' },
               ] as const
             ).map((item) => (

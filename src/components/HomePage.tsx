@@ -1,12 +1,16 @@
 import {
   Camera,
   Download,
+  Frame,
   Heart,
   Image as ImageIcon,
   Layers,
+  Palette,
+  Shapes,
   ShieldCheck,
   Sliders,
   Sparkles,
+  Sticker,
   Wand2,
 } from 'lucide-react';
 import { FILTER_PRESETS, PHOTOBOOTH_TEMPLATES } from '../data/presets';
@@ -280,11 +284,11 @@ export function HomePage({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="font-display text-xl sm:text-2xl font-bold text-[#2d1b28] mb-2">
-                  Korean Photobooth Studio
+                  Live AR Photobooth Studio
                 </h3>
                 <p className="text-sm text-[#6e4f62] max-w-md leading-relaxed">
-                  Front or rear camera preview, 3s/5s/10s countdown timers, visual flash, burst mode,
-                  2/3/4/6 frame cuts, and instant strip export.
+                  Real-time MediaPipe Face AR filters, 18 live camera effects, 36 themes, 14 frame
+                  shapes, 13 layouts, animated overlays, burst &amp; video modes with instant export.
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl bg-white border border-[#f3d5e5] flex items-center justify-center text-[#db2777] shrink-0">
@@ -370,6 +374,52 @@ export function HomePage({
               Create a Collage →
             </span>
           </button>
+        </div>
+
+        {/* CAMCALL Creative Collection Showcase Card */}
+        <div className="mt-6 rounded-3xl bg-gradient-to-r from-[#fce7f3] via-[#fff5f9] to-[#ede9fe] border border-[#f3d5e5] p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold text-[#db2777] mb-1.5">
+              NEW · CAMCALL CREATIVE COLLECTION
+            </p>
+            <h3 className="font-display text-2xl sm:text-3xl font-bold text-[#2d1b28] mb-2">
+              22 Shapes, 48 Themes, 15 Frames & Scrapbook Studio
+            </h3>
+            <p className="text-sm text-[#6e4f62] leading-relaxed mb-4">
+              Design custom photo art with Heart, Cloud, Wavy & Ticket shapes, Korean & Y2K aesthetic
+              themes, patterned/textured backgrounds, 12 layouts, 15 sticker decoration packs, and a
+              full multi-layer Scrapbook Studio.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-medium text-[#2d1b28]">
+              <div className="rounded-xl bg-white/85 border border-[#f3d5e5] px-3 py-2 flex items-center gap-2">
+                <Shapes className="w-4 h-4 text-[#db2777] shrink-0" aria-hidden="true" />
+                <span>22 Photo Shapes</span>
+              </div>
+              <div className="rounded-xl bg-white/85 border border-[#f3d5e5] px-3 py-2 flex items-center gap-2">
+                <Palette className="w-4 h-4 text-[#7c3aed] shrink-0" aria-hidden="true" />
+                <span>48 Theme Packs</span>
+              </div>
+              <div className="rounded-xl bg-white/85 border border-[#f3d5e5] px-3 py-2 flex items-center gap-2">
+                <Frame className="w-4 h-4 text-[#db2777] shrink-0" aria-hidden="true" />
+                <span>15 Aesthetic Frames</span>
+              </div>
+              <div className="rounded-xl bg-white/85 border border-[#f3d5e5] px-3 py-2 flex items-center gap-2">
+                <Sticker className="w-4 h-4 text-[#7c3aed] shrink-0" aria-hidden="true" />
+                <span>15 Decor Packs</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate('creative')}
+              className="min-h-[48px] px-6 py-3 rounded-2xl bg-[#db2777] hover:bg-[#be185d] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-md shadow-pink-500/20 transition-all cursor-pointer whitespace-nowrap"
+            >
+              <Sparkles className="w-4 h-4" aria-hidden="true" />
+              <span>Open Creative Collection</span>
+            </button>
+          </div>
         </div>
       </section>
 

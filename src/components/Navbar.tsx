@@ -13,6 +13,7 @@ const NAV_ITEMS: { id: StudioView; label: string }[] = [
   { id: 'filters', label: 'Filters' },
   { id: 'editor', label: 'Photo Editor' },
   { id: 'collage', label: 'Collage' },
+  { id: 'creative', label: 'Creative' },
   { id: 'about', label: 'About' },
 ];
 
@@ -40,7 +41,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
         </a>
 
         {/* Zone 2: Clean single-line text links */}
-        <nav aria-label="Primary" className="hidden lg:flex items-center gap-7">
+        <nav aria-label="Primary" className="hidden lg:flex items-center gap-6">
           {NAV_ITEMS.map((item) => {
             const isActive = activeView === item.id;
             return (
