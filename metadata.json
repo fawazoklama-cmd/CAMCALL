@@ -1,0 +1,6 @@
+{
+  "name": "CAMCALL",
+  "description": "CAMCALL — Your Moments, Your Style. Korean-inspired online photobooth studio, aesthetic filter library, photo editor, and collage maker.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
