@@ -15,9 +15,12 @@ const memPhotos = new Map<string, GalleryPhotoRecord>();
 const memProjects = new Map<string, LocalProjectRecord>();
 const memHistory = new Map<string, UsageHistoryRecord>();
 
+let cachedDbPromise: Promise<IDBDatabase | null> | null = null;
+
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
-  return new Promise((resolve) => {
+  if (cachedDbPromise) return cachedDbPromise;
+  cachedDbPromise = new Promise((resolve) => {
     try {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -32,12 +35,27 @@ function openDb(): Promise<IDBDatabase | null> {
           db.createObjectStore(STORE_HISTORY, { keyPath: 'id' });
         }
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onversionchange = () => {
+          db.close();
+          cachedDbPromise = null;
+        };
+        db.onclose = () => {
+          cachedDbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onerror = () => {
+        cachedDbPromise = null;
+        resolve(null);
+      };
     } catch {
+      cachedDbPromise = null;
       resolve(null);
     }
   });
+  return cachedDbPromise;
 }
 
 async function putRecord<T extends { id: string }>(

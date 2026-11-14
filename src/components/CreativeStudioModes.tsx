@@ -23,6 +23,7 @@ import type { LocalProjectRecord } from '../types/settings';
 import { loadHtmlImage } from '../utils/canvasRenderer';
 import { encodeCanvasesToGifBlob } from '../utils/gifEncoder';
 import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 import type { CreativeModeId } from './Navbar';
 
@@ -104,7 +105,7 @@ export function CreativeStudioModes({
   onOpenScrapbookStudio,
   onNotify,
 }: CreativeStudioModesProps) {
-  const { t } = useSettings();
+  const { t, lang } = useSettings();
 
   const [mode, setMode] = useState<CreativeModeId>(initialMode);
   const [themeIndex, setThemeIndex] = useState<number>(0);
@@ -806,6 +807,7 @@ export function CreativeStudioModes({
         if (e.data.size > 0) chunks.push(e.data);
       };
       recorder.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop());
         const blob = new Blob(chunks, { type: mime || 'video/webm' });
         const url = URL.createObjectURL(blob);
         setSlideshowVideoUrl((prev) => {
@@ -866,9 +868,11 @@ export function CreativeStudioModes({
   const monthNames = useMemo(
     () =>
       Array.from({ length: 12 }, (_, m) =>
-        new Date(2026, m, 1).toLocaleDateString('en-US', { month: 'long' })
+        new Date(2026, m, 1).toLocaleDateString(lang === 'id' ? 'id-ID' : 'en-US', {
+          month: 'long',
+        })
       ),
-    []
+    [lang]
   );
 
   return (
@@ -882,12 +886,15 @@ export function CreativeStudioModes({
       />
 
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.creativeModes.kicker}</p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-            {t.creativeModes.title}
-          </h1>
-          <p className="text-sm opacity-75 mt-1 max-w-2xl">{t.creativeModes.subtitle}</p>
+        <div className="flex items-start gap-3">
+          <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-[#db2777] mb-1">{t.creativeModes.kicker}</p>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+              {t.creativeModes.title}
+            </h1>
+            <p className="text-sm opacity-75 mt-1 max-w-2xl">{t.creativeModes.subtitle}</p>
+          </div>
         </div>
 
         <button

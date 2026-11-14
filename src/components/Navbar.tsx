@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import type { CameraModeId, FaceFilterCategory } from '../types/photobooth';
 import type { StudioView } from '../types/studio';
+import { CamcallLogo } from './CamcallLogo';
 
 export type CreativeModeId =
   | 'scrapbook'
@@ -98,21 +99,22 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
         backgroundColor: 'color-mix(in srgb, var(--camcall-surface) 92%, transparent)',
       }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
-        {/* Zone 1: Brand Wordmark */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
+        {/* Zone 1: Brand Wordmark + Official Logo */}
         <a
           href="#home"
           onClick={(e) => {
             e.preventDefault();
             handleSelect('home');
           }}
-          className="font-display text-2xl font-bold tracking-tight hover:text-[#db2777] transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center hover:text-[#db2777] transition-colors whitespace-nowrap shrink-0 min-w-0"
+          aria-label="CAMCALL Home"
         >
-          {t.brand.name}
+          <CamcallLogo variant="badge" size="sm" showWordmark />
         </a>
 
         {/* Zone 2: Clean Desktop Navigation Links */}
-        <nav aria-label="Primary" className="hidden lg:flex items-center gap-5">
+        <nav aria-label="Primary" className="hidden xl:flex items-center gap-4 2xl:gap-5">
           <button
             type="button"
             onClick={() => handleSelect('home')}
@@ -264,7 +266,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
         </nav>
 
         {/* Zone 3: Primary CTA + Mobile Menu */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           <button
             type="button"
             onClick={() => setLanguage(lang === 'en' ? 'id' : 'en')}
@@ -277,7 +279,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
           <button
             type="button"
             onClick={() => handleSelect('photobooth', { cameraMode: 'photobooth' })}
-            className="px-4 sm:px-5 py-2.5 rounded-xl camcall-btn-primary text-xs sm:text-sm font-semibold tracking-wide shadow-sm transition-all active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
+            className="hidden min-[360px]:inline-flex px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl camcall-btn-primary text-xs sm:text-sm font-semibold tracking-wide shadow-sm transition-all active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
           >
             {t.nav.startCreating}
           </button>
@@ -287,7 +289,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
             onClick={() => setMobileOpen((prev) => !prev)}
             aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileOpen}
-            className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border camcall-surface-soft transition-colors"
+            className="xl:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border camcall-surface-soft transition-colors"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -298,7 +300,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
       {mobileOpen && (
         <nav
           aria-label="Mobile"
-          className="lg:hidden border-t camcall-surface px-4 py-3 flex flex-col gap-1 max-h-[75vh] overflow-y-auto"
+          className="xl:hidden border-t camcall-surface px-4 py-3 flex flex-col gap-1 max-h-[75vh] overflow-y-auto"
         >
           {(
             [
@@ -351,6 +353,13 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
               </button>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => handleSelect('photobooth', { cameraMode: 'photobooth' })}
+            className="mt-2 w-full min-h-[44px] px-4 py-2.5 rounded-xl camcall-btn-primary text-xs font-semibold tracking-wide shadow-sm cursor-pointer"
+          >
+            {t.nav.startCreating}
+          </button>
         </nav>
       )}
     </header>

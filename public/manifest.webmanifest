@@ -1,0 +1,23 @@
+{
+  "name": "CAMCALL — Online Photo Studio",
+  "short_name": "CAMCALL",
+  "description": "Your Moments, Your Style. Free local browser Korean photobooth, aesthetic filters, photo editor, and collage studio.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffdfe",
+  "theme_color": "#db2777",
+  "icons": [
+    {
+      "src": "/assets/aistudio/logo_c0bef363.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/aistudio/logo_c0bef363.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import { useSettings } from '../context/SettingsContext';
 import { FILTER_PRESETS, PHOTOBOOTH_TEMPLATES } from '../data/presets';
 import { HERO_STUDIO_IMAGE, STUDIO_SAMPLE_PHOTOS } from '../data/sampleMedia';
 import type { PhotoboothTemplateId, StudioView } from '../types/studio';
+import { CamcallLogo } from './CamcallLogo';
 
 interface HomePageProps {
   onNavigate: (view: StudioView) => void;
@@ -52,9 +53,12 @@ export function HomePage({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-stretch">
             {/* Left Copy Column */}
             <div className="lg:col-span-6 flex flex-col justify-center gap-6">
-              <p className="text-sm font-semibold tracking-wide text-[#db2777]">
-                {t.home.heroKicker}
-              </p>
+              <div className="flex items-center gap-3">
+                <CamcallLogo variant="hero" />
+                <p className="text-sm font-semibold tracking-wide text-[#db2777]">
+                  {t.home.heroKicker}
+                </p>
+              </div>
 
               <h1
                 className="font-display font-bold tracking-tight leading-[1.08]"
@@ -299,11 +303,10 @@ export function HomePage({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="font-display text-xl sm:text-2xl font-bold mb-2">
-                  Live AR Photobooth Studio
+                  {t.home.bento.boothTitle}
                 </h3>
                 <p className="text-sm opacity-80 max-w-md leading-relaxed">
-                  Real-time MediaPipe Face AR filters, Gesture Camera, 21 live camera effects, 36
-                  themes, 14 frame shapes, 13 layouts, burst &amp; video pause/resume modes.
+                  {t.home.bento.boothDesc}
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl camcall-surface border flex items-center justify-center text-[#db2777] shrink-0">
@@ -327,8 +330,7 @@ export function HomePage({
                   {t.nav.filters}
                 </h3>
                 <p className="text-sm opacity-80 leading-relaxed">
-                  22 real Canvas-powered presets across Korean, Pink, Y2K, Vintage, Film, Polaroid,
-                  Dreamy, and B&W categories with Live Camera + intensity slider.
+                  {t.home.bento.filterDesc}
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl camcall-surface-soft border flex items-center justify-center text-[#7c3aed] shrink-0">
@@ -352,8 +354,7 @@ export function HomePage({
                   {t.nav.photoEditor}
                 </h3>
                 <p className="text-sm opacity-80 leading-relaxed">
-                  Fine-tune brightness, contrast, exposure, highlights, shadows, sharpness, grain,
-                  crop, rotate, flip, and decorate with 10 sticker categories.
+                  {t.home.bento.editorDesc}
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl camcall-surface-soft border flex items-center justify-center text-[#db2777] shrink-0">
@@ -377,8 +378,7 @@ export function HomePage({
                   {t.nav.collageMaker}
                 </h3>
                 <p className="text-sm opacity-80 max-w-md leading-relaxed">
-                  Combine 2, 3, 4, 6, or 9 memories into custom layouts with live camera slot
-                  capture, adjustable spacing, pastel backgrounds, captions, and cute stickers.
+                  {t.home.bento.collageDesc}
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl camcall-surface border flex items-center justify-center text-[#db2777] shrink-0">
@@ -395,32 +395,30 @@ export function HomePage({
         <div className="mt-6 rounded-3xl camcall-surface-soft border p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold text-[#db2777] mb-1.5">
-              CAMCALL CREATIVE STUDIO &amp; COLLECTION
+              {t.home.creativeBanner.kicker}
             </p>
             <h3 className="font-display text-2xl sm:text-3xl font-bold mb-2">
-              12 Creative Modes + 22 Shapes &amp; 48 Themes
+              {t.home.creativeBanner.title}
             </h3>
             <p className="text-sm opacity-80 leading-relaxed mb-4">
-              Create Polaroids, Photo Cards, Magazine Covers, Animated GIFs, Wallpapers, Photo
-              Calendars, Moodboards, ID Cards, and full multi-layer Scrapbooks with live camera
-              capture.
+              {t.home.creativeBanner.desc}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-medium">
               <div className="rounded-xl camcall-surface border px-3 py-2 flex items-center gap-2">
                 <Shapes className="w-4 h-4 text-[#db2777] shrink-0" aria-hidden="true" />
-                <span>22 Photo Shapes</span>
+                <span>{t.home.creativeBanner.shapeBadge}</span>
               </div>
               <div className="rounded-xl camcall-surface border px-3 py-2 flex items-center gap-2">
                 <Palette className="w-4 h-4 text-[#7c3aed] shrink-0" aria-hidden="true" />
-                <span>48 Theme Packs</span>
+                <span>{t.home.creativeBanner.themeBadge}</span>
               </div>
               <div className="rounded-xl camcall-surface border px-3 py-2 flex items-center gap-2">
                 <Frame className="w-4 h-4 text-[#db2777] shrink-0" aria-hidden="true" />
-                <span>12 Creative Modes</span>
+                <span>{t.home.creativeBanner.modeBadge}</span>
               </div>
               <div className="rounded-xl camcall-surface border px-3 py-2 flex items-center gap-2">
                 <Sticker className="w-4 h-4 text-[#7c3aed] shrink-0" aria-hidden="true" />
-                <span>15 Decor Packs</span>
+                <span>{t.home.creativeBanner.decorBadge}</span>
               </div>
             </div>
           </div>
@@ -514,23 +512,23 @@ export function HomePage({
           <div className="lg:col-span-5 grid grid-cols-2 gap-3">
             <div className="p-4 rounded-2xl camcall-surface border">
               <Heart className="w-5 h-5 text-[#db2777] mb-2" aria-hidden="true" />
-              <p className="text-sm font-semibold">Zero Watermarks</p>
-              <p className="text-xs opacity-70 mt-1">Clean studio prints every single time.</p>
+              <p className="text-sm font-semibold">{t.home.whyBadges.watermarkTitle}</p>
+              <p className="text-xs opacity-70 mt-1">{t.home.whyBadges.watermarkDesc}</p>
             </div>
             <div className="p-4 rounded-2xl camcall-surface border">
               <ShieldCheck className="w-5 h-5 text-[#7c3aed] mb-2" aria-hidden="true" />
-              <p className="text-sm font-semibold">No Account Needed</p>
-              <p className="text-xs opacity-70 mt-1">Open, pose, edit, and download fast.</p>
+              <p className="text-sm font-semibold">{t.home.whyBadges.noAccountTitle}</p>
+              <p className="text-xs opacity-70 mt-1">{t.home.whyBadges.noAccountDesc}</p>
             </div>
             <div className="p-4 rounded-2xl camcall-surface border">
               <ImageIcon className="w-5 h-5 text-[#db2777] mb-2" aria-hidden="true" />
-              <p className="text-sm font-semibold">PNG, JPG &amp; GIF</p>
-              <p className="text-xs opacity-70 mt-1">Adjustable image quality slider.</p>
+              <p className="text-sm font-semibold">{t.home.whyBadges.formatsTitle}</p>
+              <p className="text-xs opacity-70 mt-1">{t.home.whyBadges.formatsDesc}</p>
             </div>
             <div className="p-4 rounded-2xl camcall-surface border">
               <Sparkles className="w-5 h-5 text-[#7c3aed] mb-2" aria-hidden="true" />
-              <p className="text-sm font-semibold">Mobile Ready</p>
-              <p className="text-xs opacity-70 mt-1">Smooth touch controls on any phone.</p>
+              <p className="text-sm font-semibold">{t.home.whyBadges.mobileTitle}</p>
+              <p className="text-xs opacity-70 mt-1">{t.home.whyBadges.mobileDesc}</p>
             </div>
           </div>
         </div>

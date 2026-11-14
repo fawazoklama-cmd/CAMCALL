@@ -64,6 +64,7 @@ import {
 import { renderCreativeDesignToCanvas, traceShapePath } from '../utils/creativeRenderer';
 import { createHistoryState, pushHistory, redoHistory, undoHistory } from '../utils/imageProcessing';
 import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 
 interface CreativeCollectionStudioProps {
@@ -180,6 +181,15 @@ export function CreativeCollectionStudio({
     if (!canvas) return;
     renderCreativeDesignToCanvas(canvas, current, DEFAULT_SAMPLE_SRCS).catch(() => {});
   }, [current]);
+
+  useEffect(() => {
+    if (!previewDataUrl) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewDataUrl(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewDataUrl]);
 
   const activeLayout =
     PHOTO_LAYOUT_PRESETS.find((l) => l.id === current.layoutId) || PHOTO_LAYOUT_PRESETS[0];
@@ -489,11 +499,14 @@ export function CreativeCollectionStudio({
 
       {/* Top Studio Header & Custom Design Actions */}
       <div className="rounded-3xl camcall-surface border p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-        <div className="shrink-0">
-          <p className="text-xs font-semibold text-[#db2777]">CAMCALL Creative Collection</p>
-          <h1 className="font-display text-xl sm:text-2xl font-bold">
-            Custom Design &amp; Scrapbook Studio
-          </h1>
+        <div className="shrink-0 flex items-center gap-3">
+          <CamcallLogo variant="badge" size="sm" />
+          <div>
+            <p className="text-xs font-semibold text-[#db2777]">CAMCALL Creative Collection</p>
+            <h1 className="font-display text-xl sm:text-2xl font-bold">
+              Custom Design &amp; Scrapbook Studio
+            </h1>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">

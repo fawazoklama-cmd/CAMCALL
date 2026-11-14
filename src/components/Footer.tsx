@@ -1,5 +1,6 @@
 import { useSettings } from '../context/SettingsContext';
 import type { StudioView } from '../types/studio';
+import { CamcallLogo } from './CamcallLogo';
 
 interface FooterProps {
   onNavigate: (view: StudioView) => void;
@@ -12,11 +13,14 @@ export function Footer({ onNavigate }: FooterProps) {
     <footer className="mt-auto border-t camcall-surface-soft">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <p className="font-display text-lg font-bold">{t.brand.name}</p>
-            <p className="text-xs opacity-75 mt-1">
-              {t.brand.tagline} · {t.brand.freeLocal}
-            </p>
+          <div className="flex items-center gap-3">
+            <CamcallLogo variant="badge" size="md" />
+            <div>
+              <p className="font-display text-lg font-bold leading-tight">{t.brand.name}</p>
+              <p className="text-xs opacity-75 mt-0.5">
+                {t.brand.tagline} · {t.brand.freeLocal}
+              </p>
+            </div>
           </div>
 
           <nav aria-label="Footer" className="flex flex-wrap items-center gap-5 text-xs font-medium opacity-80">

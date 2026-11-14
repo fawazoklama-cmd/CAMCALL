@@ -44,6 +44,7 @@ import {
   undoHistory,
 } from '../utils/imageProcessing';
 import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 import { ExportControls } from './ExportControls';
 import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 import { StickerStudioPanel } from './StickerStudioPanel';
@@ -109,8 +110,13 @@ export function PhotoEditor({
 
   const current = history.present;
 
+  useEffect(() => {
+    setExportOptions((prev) => ({ ...prev, format: settings.saveFormat }));
+  }, [settings.saveFormat]);
+
   // Sync external navigation payload when arriving from FilterLibrary, Gallery, or Photobooth
   useEffect(() => {
+    if (initialProject && initialProject.kind === 'editor') return;
     if (initialImageSrc) {
       setImageSrc(initialImageSrc);
     }
@@ -123,7 +129,7 @@ export function PhotoEditor({
         })
       );
     }
-  }, [initialImageSrc, initialFilterId, initialFilterIntensity]);
+  }, [initialImageSrc, initialFilterId, initialFilterIntensity, initialProject]);
 
   // Restore saved local project
   useEffect(() => {
@@ -353,6 +359,7 @@ export function PhotoEditor({
             <ArrowLeft className="w-4 h-4 text-[#db2777]" aria-hidden="true" />
             <span>{t.editor.back}</span>
           </button>
+          <CamcallLogo variant="badge" size="xs" />
           <h1 className="font-display text-lg sm:text-xl font-bold px-1">{t.editor.title}</h1>
         </div>
 

@@ -21,6 +21,7 @@ import { renderLiveCameraFrame } from '../utils/liveCameraPipeline';
 import { recordHistoryDb, savePhotoToDb } from '../utils/localDb';
 import { aspectRatioToNumber } from '../utils/photoboothLayout';
 import { playShutterSound } from '../utils/soundEffects';
+import { CamcallLogo } from './CamcallLogo';
 import { ExportControls } from './ExportControls';
 
 interface FilterLibraryProps {
@@ -81,6 +82,10 @@ export function FilterLibrary({
     format: settings.saveFormat,
     quality: 95,
   });
+
+  useEffect(() => {
+    setExportOptions((prev) => ({ ...prev, format: settings.saveFormat }));
+  }, [settings.saveFormat]);
 
   const mainCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -229,12 +234,15 @@ export function FilterLibrary({
 
       {/* Header Row */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.filters.kicker}</p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-            {t.filters.title}
-          </h1>
-          <p className="text-sm opacity-75 mt-1">{t.filters.subtitle}</p>
+        <div className="flex items-start gap-3">
+          <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-[#db2777] mb-1">{t.filters.kicker}</p>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+              {t.filters.title}
+            </h1>
+            <p className="text-sm opacity-75 mt-1">{t.filters.subtitle}</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

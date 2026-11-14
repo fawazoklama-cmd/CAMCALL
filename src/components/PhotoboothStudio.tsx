@@ -14,6 +14,7 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  Save,
   Shapes,
   Shuffle,
   Sliders,
@@ -65,14 +66,16 @@ import type {
   FaceFilterCategory,
   FaceFilterId,
 } from '../types/photobooth';
+import type { LocalProjectRecord } from '../types/settings';
 import type { ExportOptions, PhotoboothTemplateId } from '../types/studio';
 import { downloadCanvasAsImage } from '../utils/canvasRenderer';
 import { detectFaceAnchors, initFaceTracker } from '../utils/faceTracker';
 import { prepareCleanTrackingCanvas, renderLiveCameraFrame } from '../utils/liveCameraPipeline';
-import { recordHistoryDb, savePhotoToDb } from '../utils/localDb';
+import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
 import { aspectRatioToNumber, pickRandomBoothConfig } from '../utils/photoboothLayout';
 import { renderUltimatePhotoboothToCanvas } from '../utils/photoboothRenderer';
 import { playCountdownBeep, playShutterSound } from '../utils/soundEffects';
+import { CamcallLogo } from './CamcallLogo';
 import { ExportControls } from './ExportControls';
 
 interface PhotoboothStudioProps {
@@ -83,6 +86,7 @@ interface PhotoboothStudioProps {
   initialBoothThemeId?: string;
   initialLayoutId?: BoothLayoutId;
   initialShapeId?: BoothShapeId;
+  initialProject?: LocalProjectRecord | null;
   onEditFrame: (imageSrc: string) => void;
   onNotify: (msg: string, kind?: 'success' | 'info') => void;
 }
@@ -142,6 +146,7 @@ export function PhotoboothStudio({
   initialBoothThemeId,
   initialLayoutId,
   initialShapeId,
+  initialProject,
   onEditFrame,
   onNotify,
 }: PhotoboothStudioProps) {
@@ -250,6 +255,7 @@ export function PhotoboothStudio({
   const uploadSlotInputRef = useRef<HTMLInputElement | null>(null);
   const uploadTargetSlotRef = useRef<number>(0);
   const draggingDecorRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const spinIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const activeLayout = useMemo(
     () => BOOTH_LAYOUTS.find((l) => l.id === selectedLayoutId) || BOOTH_LAYOUTS[3],
@@ -299,21 +305,53 @@ export function PhotoboothStudio({
     setRetakeIndex(null);
   }, [activeLayout.slotCount]);
 
-  // Initialize MediaPipe Face Landmarker lazily when Face AR, Gesture, or live stage turns on
   useEffect(() => {
-    if (
-      activeFaceFilters.length > 0 ||
-      cameraMode === 'gesture' ||
-      cameraState === 'active' ||
-      cameraState === 'demo-live'
-    ) {
+    setExportOptions((prev) => ({ ...prev, format: settings.saveFormat }));
+  }, [settings.saveFormat]);
+
+  // Restore saved photobooth project
+  useEffect(() => {
+    if (!initialProject || initialProject.kind !== 'photobooth') return;
+    try {
+      const parsed = JSON.parse(initialProject.stateJson);
+      if (typeof parsed.selectedThemeId === 'string') {
+        setSelectedThemeId(parsed.selectedThemeId);
+        const foundTheme = BOOTH_THEMES.find((tm) => tm.id === parsed.selectedThemeId);
+        if (foundTheme) setThemeCategory(foundTheme.category);
+      }
+      if (typeof parsed.selectedLayoutId === 'string') setSelectedLayoutId(parsed.selectedLayoutId);
+      if (typeof parsed.selectedShapeId === 'string') setSelectedShapeId(parsed.selectedShapeId);
+      if (typeof parsed.selectedFilterId === 'string') setSelectedFilterId(parsed.selectedFilterId);
+      if (typeof parsed.filterIntensity === 'number') setFilterIntensity(parsed.filterIntensity);
+      if (Array.isArray(parsed.activeEffects)) setActiveEffects(parsed.activeEffects);
+      if (Array.isArray(parsed.activeFaceFilters)) setActiveFaceFilters(parsed.activeFaceFilters);
+      if (Array.isArray(parsed.activeOverlays)) setActiveOverlays(parsed.activeOverlays);
+      if (Array.isArray(parsed.frames)) setFrames(parsed.frames);
+      if (typeof parsed.stripCaption === 'string') setStripCaption(parsed.stripCaption);
+      if (typeof parsed.showDate === 'boolean') setShowDate(parsed.showDate);
+      if ('customBgColor' in parsed) setCustomBgColor(parsed.customBgColor ?? null);
+      if ('customBorderColor' in parsed) setCustomBorderColor(parsed.customBorderColor ?? null);
+      if (Array.isArray(parsed.decorations)) setDecorations(parsed.decorations);
+      if (typeof parsed.aspectRatio === 'string') setAspectRatio(parsed.aspectRatio as BoothAspectRatio);
+    } catch {
+      // Ignore malformed project JSON
+    }
+  }, [initialProject]);
+
+  // Initialize MediaPipe Face Landmarker only when Face AR or Gesture Camera is active
+  useEffect(() => {
+    if (activeFaceFilters.length > 0 || cameraMode === 'gesture') {
       initFaceTracker().catch(() => {});
     }
-  }, [activeFaceFilters.length, cameraMode, cameraState]);
+  }, [activeFaceFilters.length, cameraMode]);
 
   useEffect(() => {
     return () => {
       burstAbortRef.current = true;
+      if (spinIntervalRef.current) {
+        clearInterval(spinIntervalRef.current);
+        spinIntervalRef.current = null;
+      }
       if (recorderRef.current && recorderRef.current.state !== 'inactive') {
         try {
           recorderRef.current.stop();
@@ -550,12 +588,15 @@ export function PhotoboothStudio({
     if (spinningFilter) return;
     setSpinningFilter(true);
     let ticks = 0;
-    const id = setInterval(() => {
+    spinIntervalRef.current = setInterval(() => {
       ticks += 1;
       const randF = FILTER_PRESETS[Math.floor(Math.random() * FILTER_PRESETS.length)];
       setSelectedFilterId(randF.id);
       if (ticks >= 10) {
-        clearInterval(id);
+        if (spinIntervalRef.current) {
+          clearInterval(spinIntervalRef.current);
+          spinIntervalRef.current = null;
+        }
         setSpinningFilter(false);
         onNotify(`Filter Wheel landed on "${randF.name}"!`);
       }
@@ -725,16 +766,23 @@ export function PhotoboothStudio({
 
     try {
       const stream = canvas.captureStream(30);
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
-      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const candidates = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4',
+      ];
+      const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c)) || '';
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       recordedChunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: mime });
+        stream.getTracks().forEach((tr) => tr.stop());
+        const chunks = recordedChunksRef.current;
+        recordedChunksRef.current = [];
+        const blob = new Blob(chunks, { type: mime || 'video/webm' });
         const url = URL.createObjectURL(blob);
         setRecordedVideoUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
@@ -889,6 +937,34 @@ export function PhotoboothStudio({
     onNotify(t.notifications.savedGallery);
   };
 
+  const handleSaveBoothProject = async () => {
+    const canvas = stripCanvasRef.current;
+    const thumb = canvas ? canvas.toDataURL('image/jpeg', 0.75) : '';
+    await saveProjectToDb({
+      title: `Photobooth · ${activeTheme.name}`,
+      kind: 'photobooth',
+      thumbnailUrl: thumb,
+      stateJson: JSON.stringify({
+        selectedThemeId,
+        selectedLayoutId,
+        selectedShapeId,
+        selectedFilterId,
+        filterIntensity,
+        activeEffects,
+        activeFaceFilters,
+        activeOverlays,
+        frames,
+        stripCaption,
+        showDate,
+        customBgColor,
+        customBorderColor,
+        decorations,
+        aspectRatio,
+      }),
+    });
+    onNotify(t.notifications.savedProject);
+  };
+
   const handleDownloadVideo = () => {
     if (!recordedVideoUrl) return;
     const link = document.createElement('a');
@@ -913,18 +989,18 @@ export function PhotoboothStudio({
             : 'aspect-[16/9]';
 
   const LEFT_TABS: { id: LeftToolTab; label: string; Icon: typeof Camera }[] = [
-    { id: 'modes', label: 'Modes', Icon: Camera },
-    { id: 'themes', label: 'Themes', Icon: Palette },
-    { id: 'layouts', label: 'Layouts', Icon: LayoutGrid },
-    { id: 'shapes', label: 'Shapes', Icon: Shapes },
-    { id: 'effects', label: 'Effects', Icon: Sparkles },
-    { id: 'face-ar', label: 'Face AR', Icon: Wand2 },
-    { id: 'overlays', label: 'Overlays', Icon: Frame },
-    { id: 'decorate', label: 'Decorate', Icon: Sticker },
+    { id: 'modes', label: t.camera.tabs.modes, Icon: Camera },
+    { id: 'themes', label: t.camera.tabs.themes, Icon: Palette },
+    { id: 'layouts', label: t.camera.tabs.layouts, Icon: LayoutGrid },
+    { id: 'shapes', label: t.camera.tabs.shapes, Icon: Shapes },
+    { id: 'effects', label: t.camera.tabs.effects, Icon: Sparkles },
+    { id: 'face-ar', label: t.camera.tabs.faceAr, Icon: Wand2 },
+    { id: 'overlays', label: t.camera.tabs.overlays, Icon: Frame },
+    { id: 'decorate', label: t.camera.tabs.decorate, Icon: Sticker },
   ];
 
   return (
-    <section className="max-w-[1440px] mx-auto w-full px-3 sm:px-5 lg:px-6 py-4 sm:py-6 flex flex-col gap-4">
+    <section className="max-w-[1440px] mx-auto w-full px-3 sm:px-5 lg:px-6 py-4 sm:py-6 flex flex-col gap-4 overflow-x-clip">
       <input
         ref={uploadSlotInputRef}
         type="file"
@@ -937,11 +1013,14 @@ export function PhotoboothStudio({
 
       {/* TOP: Studio Control Strip */}
       <div className="rounded-2xl camcall-surface border px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        <div>
-          <p className="text-[11px] font-semibold text-[#db2777] uppercase tracking-wider">
-            {t.camera.studioKicker}
-          </p>
-          <h1 className="font-display text-xl sm:text-2xl font-bold">{t.camera.studioTitle}</h1>
+        <div className="flex items-center gap-3">
+          <CamcallLogo variant="badge" size="md" />
+          <div>
+            <p className="text-[11px] font-semibold text-[#db2777] uppercase tracking-wider">
+              {t.camera.studioKicker}
+            </p>
+            <h1 className="font-display text-xl sm:text-2xl font-bold">{t.camera.studioTitle}</h1>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1041,7 +1120,7 @@ export function PhotoboothStudio({
                 onClick={() => setChallengeIndex((i) => i + 1)}
                 className="px-3 py-1.5 rounded-xl camcall-surface border text-xs font-semibold cursor-pointer"
               >
-                Next Challenge
+                {t.camera.nextChallenge}
               </button>
             </div>
           </div>
@@ -1105,7 +1184,7 @@ export function PhotoboothStudio({
       {/* MAIN 3-COLUMN STUDIO WORKSPACE */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* LEFT PANEL: Modes, Themes, Layouts, Shapes, Effects, Face AR, Overlays, Decorate */}
-        <aside className="lg:col-span-3 order-2 lg:order-1 rounded-3xl camcall-surface border p-3.5 flex flex-col gap-3">
+        <aside className="lg:col-span-3 order-2 lg:order-1 min-w-0 rounded-3xl camcall-surface border p-3.5 flex flex-col gap-3">
           <div className="grid grid-cols-4 lg:grid-cols-2 gap-1.5">
             {LEFT_TABS.map(({ id, label, Icon }) => {
               const active = activeToolTab === id;
@@ -1143,7 +1222,7 @@ export function PhotoboothStudio({
                       onClick={() => handleModeSelect(m.id)}
                       className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                         active
-                          ? 'border-[#db2777] bg-[#fdf2f8] text-[#2d1b28]'
+                          ? 'border-[#db2777] bg-[#db2777]/12 ring-1 ring-[#db2777]/35'
                           : 'camcall-surface-soft hover:border-[#f472b6]'
                       }`}
                     >
@@ -1200,7 +1279,7 @@ export function PhotoboothStudio({
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-colors ${
                         themeCategory === cat
                           ? 'bg-[#7c3aed] text-white'
-                          : 'bg-[#fdf2f8] text-[#6e4f62] hover:text-[#2d1b28]'
+                          : 'camcall-surface-soft border opacity-85 hover:opacity-100'
                       }`}
                     >
                       {cat}
@@ -1209,7 +1288,7 @@ export function PhotoboothStudio({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
-                  {BOOTH_THEMES.filter((t) => t.category === themeCategory).map((theme) => {
+                  {BOOTH_THEMES.filter((tItem) => tItem.category === themeCategory).map((theme) => {
                     const active = selectedThemeId === theme.id;
                     return (
                       <button
@@ -1218,8 +1297,8 @@ export function PhotoboothStudio({
                         onClick={() => handleSelectTheme(theme.id)}
                         className={`p-2.5 rounded-2xl border text-left flex items-center gap-2.5 cursor-pointer transition-all ${
                           active
-                            ? 'border-[#db2777] bg-[#fdf2f8] ring-2 ring-[#fce7f3]'
-                            : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                            ? 'border-[#db2777] bg-[#db2777]/10 ring-1 ring-[#db2777]/35'
+                            : 'camcall-surface-soft hover:border-[#f472b6]'
                         }`}
                       >
                         <span
@@ -1233,10 +1312,8 @@ export function PhotoboothStudio({
                           Aa
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-[#2d1b28] truncate">
-                            {theme.name}
-                          </p>
-                          <p className="text-[10px] text-[#6e4f62] truncate">
+                          <p className="text-xs font-semibold truncate">{theme.name}</p>
+                          <p className="text-[10px] opacity-70 truncate">
                             {theme.defaultShapeId} · {theme.recommendedEffects[0] || 'clean'}
                           </p>
                         </div>
@@ -1260,11 +1337,11 @@ export function PhotoboothStudio({
                       onClick={() => setSelectedLayoutId(layout.id)}
                       className={`p-2.5 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all ${
                         active
-                          ? 'border-[#db2777] bg-[#fdf2f8]'
-                          : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                          ? 'border-[#db2777] bg-[#db2777]/10 ring-1 ring-[#db2777]/35'
+                          : 'camcall-surface-soft hover:border-[#f472b6]'
                       }`}
                     >
-                      <div className="relative w-12 h-14 rounded-lg bg-[#fff8fb] border border-[#f3d5e5] overflow-hidden">
+                      <div className="relative w-12 h-14 rounded-lg camcall-surface border overflow-hidden">
                         {layout.slots.map((s, idx) => (
                           <div
                             key={idx}
@@ -1282,10 +1359,8 @@ export function PhotoboothStudio({
                         ))}
                       </div>
                       <div className="text-center">
-                        <p className="text-[11px] font-semibold text-[#2d1b28] leading-tight">
-                          {layout.name}
-                        </p>
-                        <p className="text-[10px] text-[#6e4f62]">{layout.slotCount} shots</p>
+                        <p className="text-[11px] font-semibold leading-tight">{layout.name}</p>
+                        <p className="text-[10px] opacity-70">{layout.slotCount} shots</p>
                       </div>
                     </button>
                   );
@@ -1305,12 +1380,12 @@ export function PhotoboothStudio({
                       onClick={() => setSelectedShapeId(shape.id)}
                       className={`p-2.5 rounded-2xl border text-left cursor-pointer transition-all ${
                         active
-                          ? 'border-[#db2777] bg-[#fdf2f8]'
-                          : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                          ? 'border-[#db2777] bg-[#db2777]/10 ring-1 ring-[#db2777]/35'
+                          : 'camcall-surface-soft hover:border-[#f472b6]'
                       }`}
                     >
-                      <p className="text-xs font-semibold text-[#2d1b28]">{shape.name}</p>
-                      <p className="text-[10px] text-[#6e4f62] mt-0.5 line-clamp-2">
+                      <p className="text-xs font-semibold">{shape.name}</p>
+                      <p className="text-[10px] opacity-70 mt-0.5 line-clamp-2">
                         {shape.description}
                       </p>
                     </button>
@@ -1319,12 +1394,12 @@ export function PhotoboothStudio({
               </div>
             )}
 
-            {/* TAB: REAL-TIME CAMERA EFFECTS (18 Effects) */}
+            {/* TAB: REAL-TIME CAMERA EFFECTS (21 Effects) */}
             {activeToolTab === 'effects' && (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-[#6e4f62]">
-                    Live Effects ({activeEffects.length} active)
+                  <p className="text-xs font-semibold opacity-75">
+                    {t.camera.liveEffectsLabel} ({activeEffects.length})
                   </p>
                   {activeEffects.length > 0 && (
                     <button
@@ -1332,7 +1407,7 @@ export function PhotoboothStudio({
                       onClick={() => setActiveEffects([])}
                       className="text-[11px] font-semibold text-[#db2777] cursor-pointer"
                     >
-                      Clear All
+                      {t.camera.clearAll}
                     </button>
                   )}
                 </div>
@@ -1346,17 +1421,17 @@ export function PhotoboothStudio({
                         onClick={() => toggleEffect(eff.id)}
                         className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
                           active
-                            ? 'border-[#db2777] bg-[#fdf2f8]'
-                            : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                            ? 'border-[#db2777] bg-[#db2777]/12'
+                            : 'camcall-surface-soft hover:border-[#f472b6]'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-[#2d1b28] leading-tight">
+                          <span className="text-[11px] font-semibold leading-tight">
                             {eff.name}
                           </span>
                           {active && <Check className="w-3 h-3 text-[#db2777] shrink-0" />}
                         </div>
-                        <p className="text-[10px] text-[#6e4f62] mt-0.5 truncate">
+                        <p className="text-[10px] opacity-70 mt-0.5 truncate">
                           {eff.description}
                         </p>
                       </button>
@@ -1369,6 +1444,10 @@ export function PhotoboothStudio({
             {/* TAB: REAL-TIME FACE FILTERS (MediaPipe AR Filters) */}
             {activeToolTab === 'face-ar' && (
               <div className="flex flex-col gap-2.5">
+                <div className="flex items-center gap-2 pb-1 border-b border-current/10">
+                  <CamcallLogo variant="icon" size="xs" />
+                  <span className="text-xs font-bold">{t.nav.faceStudio} · MediaPipe AR</span>
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {FACE_FILTER_CATEGORIES.map((cat) => (
                     <button
@@ -1407,7 +1486,7 @@ export function PhotoboothStudio({
                     onClick={() => setActiveFaceFilters([])}
                     className="self-end text-[11px] font-semibold text-[#db2777] cursor-pointer"
                   >
-                    Clear Face AR ({activeFaceFilters.length})
+                    {t.camera.clearFaceAr} ({activeFaceFilters.length})
                   </button>
                 )}
 
@@ -1421,7 +1500,7 @@ export function PhotoboothStudio({
                         onClick={() => toggleFaceFilter(filter.id)}
                         className={`p-2 rounded-xl border text-left flex items-center gap-2 cursor-pointer transition-all ${
                           active
-                            ? 'border-[#7c3aed] bg-[#ede9fe]/60 text-[#2d1b28]'
+                            ? 'border-[#7c3aed] bg-[#7c3aed]/15'
                             : 'camcall-surface-soft hover:border-[#a78bfa]'
                         }`}
                       >
@@ -1437,11 +1516,11 @@ export function PhotoboothStudio({
               </div>
             )}
 
-            {/* TAB: ANIMATED CAMERA OVERLAYS (9 Overlays) */}
+            {/* TAB: ANIMATED CAMERA OVERLAYS */}
             {activeToolTab === 'overlays' && (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-[#6e4f62]">
+                  <p className="text-xs font-semibold opacity-75">
                     Live Overlays ({activeOverlays.length})
                   </p>
                   {activeOverlays.length > 0 && (
@@ -1464,16 +1543,16 @@ export function PhotoboothStudio({
                         onClick={() => toggleOverlay(ov.id)}
                         className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
                           active
-                            ? 'border-[#db2777] bg-[#fdf2f8]'
-                            : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                            ? 'border-[#db2777] bg-[#db2777]/12'
+                            : 'camcall-surface-soft hover:border-[#f472b6]'
                         }`}
                       >
-                        <span className="text-xs font-semibold text-[#2d1b28]">
+                        <span className="text-xs font-semibold">
                           {ov.symbol} {ov.name}
                         </span>
                         <span
                           className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
-                            active ? 'bg-[#db2777] text-white' : 'bg-[#fdf2f8] text-[#6e4f62]'
+                            active ? 'bg-[#db2777] text-white' : 'camcall-surface border opacity-75'
                           }`}
                         >
                           {active ? 'ON' : 'OFF'}
@@ -1488,7 +1567,7 @@ export function PhotoboothStudio({
             {/* TAB: POST-CAPTURE PHOTO DECORATION */}
             {activeToolTab === 'decorate' && (
               <div className="flex flex-col gap-3">
-                <p className="text-xs font-semibold text-[#6e4f62]">Add Stickers &amp; Doodles</p>
+                <p className="text-xs font-semibold opacity-75">Stickers &amp; Doodles</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   {BOOTH_DECORATION_PRESETS.map((d) => (
                     <button
@@ -1502,7 +1581,7 @@ export function PhotoboothStudio({
                           color: d.color,
                         })
                       }
-                      className="p-2 rounded-xl border border-[#f3d5e5] hover:border-[#db2777] bg-white text-xs font-medium text-[#2d1b28] flex items-center gap-1.5 cursor-pointer"
+                      className="p-2 rounded-xl border camcall-surface-soft hover:border-[#db2777] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
                     >
                       <span>{d.symbol}</span>
                       <span className="truncate">{d.label}</span>
@@ -1511,21 +1590,21 @@ export function PhotoboothStudio({
                 </div>
 
                 {/* Add Text / Handwritten Font / Timestamp */}
-                <div className="pt-2 border-t border-[#f3d5e5] flex flex-col gap-2">
-                  <p className="text-xs font-semibold text-[#6e4f62]">Text &amp; Timestamp</p>
+                <div className="pt-2 border-t border-current/10 flex flex-col gap-2">
+                  <p className="text-xs font-semibold opacity-75">Text &amp; Timestamp</p>
                   <input
                     type="text"
                     value={textDraft}
                     onChange={(e) => setTextDraft(e.target.value)}
                     placeholder="Custom text..."
-                    className="px-2.5 py-1.5 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] text-xs text-[#2d1b28]"
+                    className="px-2.5 py-1.5 rounded-xl camcall-surface-soft border text-xs"
                   />
                   <div className="flex gap-1.5">
                     <select
                       aria-label="Handwritten font"
                       value={textFont}
                       onChange={(e) => setTextFont(e.target.value)}
-                      className="flex-1 px-2 py-1.5 rounded-xl bg-white border border-[#f3d5e5] text-xs text-[#2d1b28]"
+                      className="flex-1 px-2 py-1.5 rounded-xl camcall-surface-soft border text-xs"
                     >
                       {HANDWRITTEN_FONTS.map((f) => (
                         <option key={f.id} value={f.id}>
@@ -1538,7 +1617,7 @@ export function PhotoboothStudio({
                       aria-label="Text color"
                       value={textColor}
                       onChange={(e) => setTextColor(e.target.value)}
-                      className="w-9 h-8 rounded-lg border border-[#f3d5e5] cursor-pointer"
+                      className="w-9 h-8 rounded-lg border cursor-pointer"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -1556,7 +1635,7 @@ export function PhotoboothStudio({
                       className="py-2 px-2 rounded-xl bg-[#db2777] text-white text-xs font-semibold inline-flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <Type className="w-3.5 h-3.5" />
-                      <span>Add Text</span>
+                      <span>{t.camera.addText}</span>
                     </button>
                     <button
                       type="button"
@@ -1573,16 +1652,16 @@ export function PhotoboothStudio({
                           fontFamily: 'JetBrains Mono',
                         })
                       }
-                      className="py-2 px-2 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] text-[#2d1b28] text-xs font-semibold cursor-pointer"
+                      className="py-2 px-2 rounded-xl camcall-surface-soft border text-xs font-semibold cursor-pointer"
                     >
-                      + Date Stamp
+                      {t.camera.dateStamp}
                     </button>
                   </div>
                 </div>
 
                 {/* Borders & Background Overrides */}
-                <div className="pt-2 border-t border-[#f3d5e5] flex flex-col gap-2">
-                  <p className="text-xs font-semibold text-[#6e4f62]">Custom Background &amp; Border</p>
+                <div className="pt-2 border-t border-current/10 flex flex-col gap-2">
+                  <p className="text-xs font-semibold opacity-75">{t.camera.customBgBorder}</p>
                   <div className="flex items-center gap-3 text-xs">
                     <label className="flex items-center gap-1.5">
                       <span>Bg:</span>
@@ -1590,7 +1669,7 @@ export function PhotoboothStudio({
                         type="color"
                         value={customBgColor || activeTheme.backgroundColor}
                         onChange={(e) => setCustomBgColor(e.target.value)}
-                        className="w-7 h-7 rounded border border-[#f3d5e5] cursor-pointer"
+                        className="w-7 h-7 rounded border cursor-pointer"
                       />
                     </label>
                     <label className="flex items-center gap-1.5">
@@ -1599,7 +1678,7 @@ export function PhotoboothStudio({
                         type="color"
                         value={customBorderColor || activeTheme.borderColor}
                         onChange={(e) => setCustomBorderColor(e.target.value)}
-                        className="w-7 h-7 rounded border border-[#f3d5e5] cursor-pointer"
+                        className="w-7 h-7 rounded border cursor-pointer"
                       />
                     </label>
                     {(customBgColor || customBorderColor) && (
@@ -1619,10 +1698,10 @@ export function PhotoboothStudio({
 
                 {/* Selected Decoration Scale / Rotate / Delete */}
                 {selectedDecor && (
-                  <div className="pt-2 border-t border-[#f3d5e5] flex flex-col gap-2 bg-[#fdf2f8] p-2.5 rounded-2xl">
+                  <div className="pt-2 border-t border-current/10 flex flex-col gap-2 camcall-surface-soft p-2.5 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-[#2d1b28]">
-                        Edit: {selectedDecor.label}
+                      <span className="text-xs font-bold">
+                        {t.gallery.editPhoto}: {selectedDecor.label}
                       </span>
                       <button
                         type="button"
@@ -1630,12 +1709,12 @@ export function PhotoboothStudio({
                           setDecorations((prev) => prev.filter((d) => d.id !== selectedDecor.id));
                           setSelectedDecorId(null);
                         }}
-                        className="text-rose-600 text-xs font-semibold cursor-pointer"
+                        className="text-rose-500 text-xs font-semibold cursor-pointer"
                       >
-                        Delete
+                        {t.gallery.deleteItem}
                       </button>
                     </div>
-                    <label className="text-[11px] text-[#6e4f62] flex items-center justify-between gap-2">
+                    <label className="text-[11px] opacity-80 flex items-center justify-between gap-2">
                       <span>Size</span>
                       <input
                         type="range"
@@ -1653,7 +1732,7 @@ export function PhotoboothStudio({
                         className="studio-slider flex-1"
                       />
                     </label>
-                    <label className="text-[11px] text-[#6e4f62] flex items-center justify-between gap-2">
+                    <label className="text-[11px] opacity-80 flex items-center justify-between gap-2">
                       <span>Rotate</span>
                       <input
                         type="range"
@@ -1681,8 +1760,8 @@ export function PhotoboothStudio({
         </aside>
 
         {/* CENTER: Live Camera Preview + BOTTOM Camera Dock & Gallery */}
-        <div className="lg:col-span-5 order-1 lg:order-2 flex flex-col gap-4">
-          <div className="rounded-3xl camcall-surface border p-3.5 sm:p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
+        <div className="lg:col-span-5 order-1 lg:order-2 min-w-0 flex flex-col gap-4">
+          <div className="min-w-0 rounded-3xl camcall-surface border p-3.5 sm:p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
             {/* Gesture Mode Indicator */}
             {cameraMode === 'gesture' && (
               <div className="px-3 py-2 rounded-xl camcall-surface-soft border flex items-center justify-between gap-2 text-xs">
@@ -1736,7 +1815,7 @@ export function PhotoboothStudio({
                     {countdown}
                   </span>
                   <span className="text-sm font-medium mt-2">
-                    {retakeIndex !== null ? `Retaking #${retakeIndex + 1}` : 'Pose for CAMCALL!'}
+                    {retakeIndex !== null ? `${t.camera.retakingLabel}${retakeIndex + 1}` : t.camera.posePrompt}
                   </span>
                 </div>
               )}
@@ -1744,11 +1823,9 @@ export function PhotoboothStudio({
               {/* Idle State */}
               {cameraState === 'idle' && (
                 <div className="p-5 text-center max-w-sm flex flex-col items-center gap-3.5 text-white">
-                  <div className="w-13 h-13 rounded-2xl bg-white/15 flex items-center justify-center">
-                    <Camera className="w-6 h-6 text-pink-200" aria-hidden="true" />
-                  </div>
+                  <CamcallLogo variant="badge" size="lg" />
                   <div>
-                    <h2 className="font-display text-lg font-bold">Start CAMCALL Studio</h2>
+                    <h2 className="font-display text-lg font-bold">{t.camera.startBoothTitle}</h2>
                     <p className="text-xs text-pink-100/90 mt-1 leading-relaxed">
                       {t.camera.permissionRequiredDesc}
                     </p>
@@ -1810,29 +1887,29 @@ export function PhotoboothStudio({
             {/* Demo Model Switcher */}
             {cameraState === 'demo-live' && (
               <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl camcall-surface-soft border text-xs">
-                <span className="font-medium opacity-75">Live Studio AR Model:</span>
+                <span className="font-medium opacity-75">{t.camera.liveModel}:</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setDemoModelIndex((i) => (i + 1) % STUDIO_SAMPLE_PHOTOS.length)}
                     className="px-2.5 py-1 rounded-lg camcall-surface border font-semibold cursor-pointer"
                   >
-                    Switch Model
+                    {t.camera.switchModel}
                   </button>
                   <button
                     type="button"
                     onClick={() => startCamera()}
                     className="px-2.5 py-1 rounded-lg bg-[#db2777] text-white font-semibold cursor-pointer"
                   >
-                    Use Real Camera
+                    {t.camera.useRealCamera}
                   </button>
                 </div>
               </div>
             )}
 
             {/* BOTTOM BAR: Filter Carousel + Filter Intensity */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 studio-scroll">
+            <div className="flex flex-col gap-2 min-w-0">
+              <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1 studio-scroll">
                 {[{ id: 'none', name: 'Original' }, ...FILTER_PRESETS].map((f) => {
                   const active = selectedFilterId === f.id;
                   return (
@@ -1920,8 +1997,8 @@ export function PhotoboothStudio({
                       {retakeIndex !== null
                         ? `${t.camera.retakeFrame}${retakeIndex + 1}`
                         : cameraMode === 'burst'
-                          ? `Burst (${burstCount})`
-                          : `Shoot Booth (${activeLayout.slotCount})`}
+                          ? `${t.camera.burstShoot} (${burstCount})`
+                          : `${t.camera.shootBooth} (${activeLayout.slotCount})`}
                     </span>
                   </>
                 ) : (
@@ -1950,13 +2027,13 @@ export function PhotoboothStudio({
             {burstShots.length > 0 && (
               <div className="pt-2 border-t border-current/10 flex flex-col gap-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-[#db2777]">Burst Captures — Click to set Slot #1</span>
+                  <span className="font-bold text-[#db2777]">{t.camera.burstCapturesLabel}</span>
                   <button
                     type="button"
                     onClick={() => setBurstShots([])}
                     className="text-[11px] opacity-70 cursor-pointer"
                   >
-                    Dismiss
+                    {t.camera.dismissBtn}
                   </button>
                 </div>
                 <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -1979,12 +2056,12 @@ export function PhotoboothStudio({
           </div>
 
           {/* BOTTOM GALLERY PREVIEW STRIP */}
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-3.5 flex flex-col gap-2.5">
+          <div className="rounded-3xl camcall-surface border p-3.5 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <h2 className="font-display text-sm font-bold text-[#2d1b28]">
-                Gallery Shots ({capturedCount}/{activeLayout.slotCount})
+              <h2 className="font-display text-sm font-bold">
+                {t.camera.galleryShots} ({capturedCount}/{activeLayout.slotCount})
               </h2>
-              <span className="text-[11px] text-[#6e4f62]">Retake, Upload, or Edit any shot</span>
+              <span className="text-[11px] opacity-70">{t.camera.galleryHint}</span>
             </div>
 
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -1992,10 +2069,12 @@ export function PhotoboothStudio({
                 <div
                   key={idx}
                   className={`rounded-xl border p-1.5 flex flex-col gap-1.5 ${
-                    retakeIndex === idx ? 'border-[#db2777] bg-[#fdf2f8]' : 'border-[#f3d5e5]'
+                    retakeIndex === idx
+                      ? 'border-[#db2777] bg-[#db2777]/12'
+                      : 'camcall-surface-soft'
                   }`}
                 >
-                  <div className="aspect-[4/3] rounded-lg overflow-hidden bg-[#fdf2f8] flex items-center justify-center">
+                  <div className="aspect-[4/3] rounded-lg overflow-hidden camcall-surface border flex items-center justify-center">
                     {frameSrc ? (
                       <img
                         src={frameSrc}
@@ -2003,7 +2082,7 @@ export function PhotoboothStudio({
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <span className="font-mono text-[11px] text-[#6e4f62]">#{idx + 1}</span>
+                      <span className="font-mono text-[11px] opacity-65">#{idx + 1}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1">
@@ -2011,19 +2090,19 @@ export function PhotoboothStudio({
                       <button
                         type="button"
                         onClick={() => setRetakeIndex(idx)}
-                        className="flex-1 py-1 px-1.5 rounded-md bg-[#fdf2f8] text-[#db2777] text-[10px] font-semibold inline-flex items-center justify-center gap-0.5 cursor-pointer"
+                        className="flex-1 py-1 px-1.5 rounded-md camcall-surface border text-[#db2777] text-[10px] font-semibold inline-flex items-center justify-center gap-0.5 cursor-pointer"
                       >
                         <RotateCcw className="w-2.5 h-2.5" />
-                        <span>Retake</span>
+                        <span>{t.camera.retakeBtn}</span>
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleSlotUploadTrigger(idx)}
-                        className="flex-1 py-1 px-1.5 rounded-md bg-[#fdf2f8] text-[#2d1b28] text-[10px] font-semibold inline-flex items-center justify-center gap-0.5 cursor-pointer"
+                        className="flex-1 py-1 px-1.5 rounded-md camcall-surface border text-[10px] font-semibold inline-flex items-center justify-center gap-0.5 cursor-pointer"
                       >
                         <Upload className="w-2.5 h-2.5" />
-                        <span>Upload</span>
+                        <span>{t.camera.uploadBtn}</span>
                       </button>
                     )}
 
@@ -2032,7 +2111,7 @@ export function PhotoboothStudio({
                         type="button"
                         aria-label={`Edit shot ${idx + 1}`}
                         onClick={() => onEditFrame(frameSrc)}
-                        className="p-1 rounded-md bg-violet-50 text-violet-700 cursor-pointer"
+                        className="p-1 rounded-md camcall-surface border text-[#7c3aed] cursor-pointer"
                       >
                         <Sliders className="w-3 h-3" />
                       </button>
@@ -2045,7 +2124,7 @@ export function PhotoboothStudio({
         </div>
 
         {/* RIGHT PANEL: Camera Settings, Selected Effects, Live Result Canvas & Export */}
-        <aside className="lg:col-span-4 order-3 flex flex-col gap-4">
+        <aside className="lg:col-span-4 order-3 min-w-0 flex flex-col gap-4">
           {/* Camera Settings Card */}
           <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
             <h2 className="font-display text-sm font-bold">{t.camera.settingsTitle}</h2>
@@ -2224,7 +2303,7 @@ export function PhotoboothStudio({
           {/* Live Rendered Photostrip / Collage Result + Free Export */}
           <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-display text-sm font-bold">Photostrip &amp; Collage Preview</h2>
+              <h2 className="font-display text-sm font-bold">{t.camera.resultPreviewTitle}</h2>
               <select
                 aria-label="Export resolution preset"
                 value={qualityPreset}
@@ -2237,14 +2316,14 @@ export function PhotoboothStudio({
               </select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <input
                 type="text"
                 aria-label="Custom photostrip caption"
                 value={stripCaption}
                 onChange={(e) => setStripCaption(e.target.value)}
-                placeholder="Caption (e.g. Besties Seoul Day ♡)"
-                className="flex-1 px-3 py-1.5 rounded-xl camcall-surface-soft border text-xs"
+                placeholder={t.camera.captionPlaceholder}
+                className="flex-1 min-w-0 px-3 py-1.5 rounded-xl camcall-surface-soft border text-xs"
               />
               <label className="inline-flex items-center gap-1.5 text-xs opacity-80 cursor-pointer shrink-0">
                 <input
@@ -2253,7 +2332,7 @@ export function PhotoboothStudio({
                   onChange={(e) => setShowDate(e.target.checked)}
                   className="accent-[#db2777]"
                 />
-                <span>Date</span>
+                <span>{t.camera.dateToggle}</span>
               </label>
             </div>
 
@@ -2269,27 +2348,37 @@ export function PhotoboothStudio({
               />
             </div>
 
-            <button
-              type="button"
-              onClick={handleSaveStripToGallery}
-              className="w-full min-h-[40px] px-4 py-2 rounded-xl camcall-surface-soft border hover:border-[#db2777] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <FolderHeart className="w-4 h-4 text-[#db2777]" />
-              <span>{t.camera.saveToGallery}</span>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleSaveBoothProject}
+                className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border hover:border-[#7c3aed] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-4 h-4 text-[#7c3aed]" />
+                <span>{t.camera.saveProject}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStripToGallery}
+                className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border hover:border-[#db2777] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <FolderHeart className="w-4 h-4 text-[#db2777]" />
+                <span>{t.camera.saveToGallery}</span>
+              </button>
+            </div>
 
             <ExportControls
               options={exportOptions}
               onChange={setExportOptions}
               onDownload={handleDownloadOutput}
-              buttonLabel={`Download ${exportOptions.format.toUpperCase()} Free`}
+              buttonLabel={`${t.camera.downloadFree} (${exportOptions.format.toUpperCase()})`}
             />
 
             {recordedVideoUrl && (
-              <div className="pt-2 border-t border-[#f3d5e5] flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-[#6d28d9] inline-flex items-center gap-1.5">
+              <div className="pt-2 border-t border-current/10 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-[#7c3aed] inline-flex items-center gap-1.5">
                   <Film className="w-4 h-4" />
-                  Recorded Live Clip Ready
+                  {t.camera.videoReady}
                 </span>
                 <button
                   type="button"
@@ -2297,7 +2386,7 @@ export function PhotoboothStudio({
                   className="px-3 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download Video</span>
+                  <span>{t.camera.downloadVideo}</span>
                 </button>
               </div>
             )}

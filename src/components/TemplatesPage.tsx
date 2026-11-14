@@ -1,9 +1,10 @@
 import { Check, Eye, Sparkles, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import type { BoothLayoutId, BoothShapeId } from '../types/photobooth';
 import type { CreativeModeId } from './Navbar';
 import { recordHistoryDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 
 export interface StudioTemplateEntry {
   id: string;
@@ -242,14 +243,26 @@ export function TemplatesPage({ onUseTemplate, onNotify }: TemplatesPageProps) {
     onNotify(`${tpl.name} applied!`);
   };
 
+  useEffect(() => {
+    if (!previewTpl) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewTpl(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewTpl]);
+
   return (
     <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold text-[#db2777] mb-1">{t.templates.kicker}</p>
-        <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-          {t.templates.title}
-        </h1>
-        <p className="text-sm opacity-75 mt-1 max-w-2xl">{t.templates.subtitle}</p>
+      <div className="flex items-start gap-3">
+        <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+        <div>
+          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.templates.kicker}</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+            {t.templates.title}
+          </h1>
+          <p className="text-sm opacity-75 mt-1 max-w-2xl">{t.templates.subtitle}</p>
+        </div>
       </div>
 
       {/* Category Filter */}

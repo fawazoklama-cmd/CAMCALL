@@ -18,6 +18,7 @@ import type { BoothAspectRatio, BoothShapeId } from '../types/photobooth';
 import { renderLiveCameraFrame } from '../utils/liveCameraPipeline';
 import { aspectRatioToNumber } from '../utils/photoboothLayout';
 import { playCountdownBeep, playShutterSound } from '../utils/soundEffects';
+import { CamcallLogo } from './CamcallLogo';
 
 interface LiveCameraCaptureModalProps {
   open: boolean;
@@ -51,9 +52,14 @@ export function LiveCameraCaptureModal({
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!open) {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
       setCapturedPreview(null);
       setCountdown(null);
       engine.stopStream();
@@ -62,6 +68,24 @@ export function LiveCameraCaptureModal({
     setMirror(settings.mirrorPreview);
     if (initialAspectRatio) setAspectRatio(initialAspectRatio);
   }, [open, initialAspectRatio, settings.mirrorPreview]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (open && videoRef.current) {
@@ -140,13 +164,19 @@ export function LiveCameraCaptureModal({
       snapNow();
       return;
     }
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+    }
     let rem = timerSec;
     setCountdown(rem);
     if (settings.cameraSoundEnabled) playCountdownBeep(false);
-    const id = setInterval(() => {
+    countdownTimerRef.current = setInterval(() => {
       rem -= 1;
       if (rem <= 0) {
-        clearInterval(id);
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
         setCountdown(null);
         snapNow();
       } else {
@@ -180,13 +210,16 @@ export function LiveCameraCaptureModal({
         <video ref={videoRef} playsInline muted autoPlay className="hidden" />
 
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-display text-lg font-bold">
-              {title || t.camera.captureFromCamera}
-            </h2>
-            <p className="text-xs opacity-75">
-              CAMCALL Shared Camera Engine · {aspectRatio}
-            </p>
+          <div className="flex items-center gap-2.5">
+            <CamcallLogo variant="badge" size="sm" />
+            <div>
+              <h2 className="font-display text-lg font-bold">
+                {title || t.camera.captureFromCamera}
+              </h2>
+              <p className="text-xs opacity-75">
+                CAMCALL Shared Camera Engine · {aspectRatio}
+              </p>
+            </div>
           </div>
           <button
             type="button"

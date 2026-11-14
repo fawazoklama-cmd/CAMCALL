@@ -1,22 +1,25 @@
-import { Camera, FolderHeart, ImagePlus, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Camera, FolderHeart, ImagePlus, Save, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { COLLAGE_BACKGROUNDS, COLLAGE_TEMPLATES } from '../data/presets';
 import { STUDIO_SAMPLE_PHOTOS } from '../data/sampleMedia';
+import type { LocalProjectRecord } from '../types/settings';
 import type { CanvasLayer, CollagePhotoCount, ExportOptions } from '../types/studio';
 import { downloadCanvasAsImage, renderCollageToCanvas } from '../utils/canvasRenderer';
-import { recordHistoryDb, savePhotoToDb } from '../utils/localDb';
+import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 import { ExportControls } from './ExportControls';
 import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 import { StickerStudioPanel } from './StickerStudioPanel';
 
 interface CollageMakerProps {
+  initialProject?: LocalProjectRecord | null;
   onNotify: (msg: string, kind?: 'success' | 'info') => void;
 }
 
 const PHOTO_COUNTS: CollagePhotoCount[] = [2, 3, 4, 6, 9];
 
-export function CollageMaker({ onNotify }: CollageMakerProps) {
+export function CollageMaker({ initialProject, onNotify }: CollageMakerProps) {
   const { settings, t } = useSettings();
   const [selectedCount, setSelectedCount] = useState<CollagePhotoCount>(4);
   const [templateId, setTemplateId] = useState<string>('4-grid');
@@ -64,6 +67,27 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
       })
     );
   };
+
+  useEffect(() => {
+    setExportOptions((prev) => ({ ...prev, format: settings.saveFormat }));
+  }, [settings.saveFormat]);
+
+  useEffect(() => {
+    if (!initialProject || initialProject.kind !== 'collage') return;
+    try {
+      const parsed = JSON.parse(initialProject.stateJson);
+      if (parsed.selectedCount) setSelectedCount(parsed.selectedCount);
+      if (typeof parsed.templateId === 'string') setTemplateId(parsed.templateId);
+      if (Array.isArray(parsed.photos)) setPhotos(parsed.photos);
+      if (typeof parsed.spacing === 'number') setSpacing(parsed.spacing);
+      if (typeof parsed.borderWidth === 'number') setBorderWidth(parsed.borderWidth);
+      if (typeof parsed.cornerRadius === 'number') setCornerRadius(parsed.cornerRadius);
+      if (typeof parsed.background === 'string') setBackground(parsed.background);
+      if (Array.isArray(parsed.layers)) setLayers(parsed.layers);
+    } catch {
+      // Ignore malformed project JSON
+    }
+  }, [initialProject]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -148,6 +172,27 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
     onNotify(t.notifications.savedGallery);
   };
 
+  const handleSaveProject = async () => {
+    const canvas = canvasRef.current;
+    const thumb = canvas ? canvas.toDataURL('image/jpeg', 0.75) : '';
+    await saveProjectToDb({
+      title: `Collage ${selectedCount}-Shot · ${activeTemplate.name}`,
+      kind: 'collage',
+      thumbnailUrl: thumb,
+      stateJson: JSON.stringify({
+        selectedCount,
+        templateId,
+        photos,
+        spacing,
+        borderWidth,
+        cornerRadius,
+        background,
+        layers,
+      }),
+    });
+    onNotify(t.notifications.savedProject);
+  };
+
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -217,12 +262,15 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
 
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.collage.kicker}</p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-            {t.collage.title}
-          </h1>
-          <p className="text-sm opacity-75 mt-1">{t.collage.subtitle}</p>
+        <div className="flex items-start gap-3">
+          <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-[#db2777] mb-1">{t.collage.kicker}</p>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+              {t.collage.title}
+            </h1>
+            <p className="text-sm opacity-75 mt-1">{t.collage.subtitle}</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -255,6 +303,14 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
           </button>
           <button
             type="button"
+            onClick={handleSaveProject}
+            className="min-h-[42px] px-3.5 py-2 rounded-xl camcall-surface border hover:border-[#7c3aed] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <Save className="w-4 h-4 text-[#7c3aed]" aria-hidden="true" />
+            <span>{t.collage.saveProject}</span>
+          </button>
+          <button
+            type="button"
             onClick={handleSaveToGallery}
             className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
@@ -281,13 +337,15 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
               />
             </div>
             <p className="text-xs opacity-75 text-center">
-              Drag stickers or text directly on the collage preview to reposition them.
+              {t.collage.dragHint}
             </p>
           </div>
 
           {/* Individual Photo Slots */}
           <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
-            <h2 className="font-display text-base font-bold">Photo Slots ({selectedCount})</h2>
+            <h2 className="font-display text-base font-bold">
+              {t.collage.slotsTitle} ({selectedCount})
+            </h2>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
               {photos.slice(0, selectedCount).map((src, idx) => (
                 <div
@@ -327,7 +385,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                       className="flex-1 py-1 px-1 rounded-lg camcall-surface border hover:border-[#db2777] text-[10px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <ImagePlus className="w-3 h-3 text-[#7c3aed]" aria-hidden="true" />
-                      <span>Swap</span>
+                      <span>{t.collage.swap}</span>
                     </button>
                     {src && (
                       <button
@@ -359,7 +417,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                   activePanel === 'layout' ? 'bg-[#db2777] text-white' : 'opacity-80'
                 }`}
               >
-                Layout & Style
+                {t.collage.layoutStyle}
               </button>
               <button
                 type="button"
@@ -368,14 +426,14 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                   activePanel === 'decorate' ? 'bg-[#db2777] text-white' : 'opacity-80'
                 }`}
               >
-                Text & Stickers ({layers.length})
+                {t.collage.textStickers} ({layers.length})
               </button>
             </div>
 
             {activePanel === 'layout' ? (
               <div className="flex flex-col gap-4">
                 <div>
-                  <span className="text-xs font-semibold block mb-2">Number of Photos</span>
+                  <span className="text-xs font-semibold block mb-2">{t.collage.photoCountLabel}</span>
                   <div className="grid grid-cols-5 gap-1.5">
                     {PHOTO_COUNTS.map((count) => (
                       <button
@@ -395,7 +453,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                 </div>
 
                 <div>
-                  <span className="text-xs font-semibold block mb-2">Grid Template</span>
+                  <span className="text-xs font-semibold block mb-2">{t.collage.gridTemplateLabel}</span>
                   <div className="flex flex-col gap-1.5">
                     {templatesForCount.map((tpl) => (
                       <button
@@ -521,7 +579,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
             options={exportOptions}
             onChange={setExportOptions}
             onDownload={handleDownload}
-            buttonLabel="Download Collage Free"
+            buttonLabel={t.collage.downloadCollage}
           />
         </div>
       </div>

@@ -9,7 +9,8 @@ export type StudioView =
   | 'templates'
   | 'gallery'
   | 'settings'
-  | 'about';
+  | 'about'
+  | 'not-found';
 
 export type FilterCategory =
   | 'All'

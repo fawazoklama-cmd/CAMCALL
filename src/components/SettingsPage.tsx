@@ -10,12 +10,13 @@ import {
   Trash2,
   Volume2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { BOOTH_ASPECT_RATIOS, CAMERA_MODE_PRESETS, CAMERA_RESOLUTIONS } from '../data/photoboothPresets';
 import type { CameraModeId, CameraResolutionId } from '../types/photobooth';
 import type { AppThemeId, TextSizeScale } from '../types/settings';
 import { clearHistoryDb, clearPhotosFromDb, clearProjectsFromDb } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 
 interface SettingsPageProps {
   onClearSessionPhotos: () => void;
@@ -50,15 +51,27 @@ export function SettingsPage({ onClearSessionPhotos, onNotify }: SettingsPagePro
     setConfirmKind(null);
   };
 
+  useEffect(() => {
+    if (!confirmKind) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmKind(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmKind]);
+
   return (
     <section className="max-w-5xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex flex-col gap-6">
-      <div>
-        <p className="text-xs font-semibold text-[#db2777] mb-1">{t.settings.kicker}</p>
-        <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-          {t.settings.title}
-        </h1>
-        <p className="text-sm opacity-75 mt-1">{t.settings.subtitle}</p>
-        <p className="text-xs text-[#7c3aed] font-medium mt-2">{t.settings.savedNotice}</p>
+      <div className="flex items-start gap-3">
+        <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+        <div>
+          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.settings.kicker}</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+            {t.settings.title}
+          </h1>
+          <p className="text-sm opacity-75 mt-1">{t.settings.subtitle}</p>
+          <p className="text-xs text-[#7c3aed] font-medium mt-2">{t.settings.savedNotice}</p>
+        </div>
       </div>
 
       {/* A. LANGUAGE SETTINGS */}

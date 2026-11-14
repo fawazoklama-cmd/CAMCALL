@@ -1,20 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
-import { CollageMaker } from './components/CollageMaker';
-import { CreativeCollectionStudio } from './components/CreativeCollectionStudio';
-import { CreativeStudioModes } from './components/CreativeStudioModes';
-import { FilterLibrary } from './components/FilterLibrary';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { CamcallLoadingScreen } from './components/CamcallLoadingScreen';
 import { Footer } from './components/Footer';
-import { GalleryPage } from './components/GalleryPage';
 import { HomePage } from './components/HomePage';
 import {
   Navbar,
   type CreativeModeId,
   type StudioNavigationPayload,
 } from './components/Navbar';
-import { PhotoEditor } from './components/PhotoEditor';
-import { PhotoboothStudio, type LeftToolTab } from './components/PhotoboothStudio';
-import { SettingsPage } from './components/SettingsPage';
-import { TemplatesPage, type StudioTemplateEntry } from './components/TemplatesPage';
+import { NotFoundPage } from './components/NotFoundPage';
+import type { LeftToolTab } from './components/PhotoboothStudio';
+import type { StudioTemplateEntry } from './components/TemplatesPage';
 import { ToastContainer, type ToastMessage } from './components/Toast';
 import { CameraEngineProvider, useCameraEngine } from './context/CameraEngineContext';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
@@ -27,7 +22,60 @@ import type {
 import type { LocalProjectRecord } from './types/settings';
 import type { PhotoboothTemplateId, SavedCreation, StudioView } from './types/studio';
 
+const PhotoboothStudio = lazy(() =>
+  import('./components/PhotoboothStudio').then((m) => ({ default: m.PhotoboothStudio }))
+);
+const FilterLibrary = lazy(() =>
+  import('./components/FilterLibrary').then((m) => ({ default: m.FilterLibrary }))
+);
+const PhotoEditor = lazy(() =>
+  import('./components/PhotoEditor').then((m) => ({ default: m.PhotoEditor }))
+);
+const CollageMaker = lazy(() =>
+  import('./components/CollageMaker').then((m) => ({ default: m.CollageMaker }))
+);
+const CreativeCollectionStudio = lazy(() =>
+  import('./components/CreativeCollectionStudio').then((m) => ({
+    default: m.CreativeCollectionStudio,
+  }))
+);
+const CreativeStudioModes = lazy(() =>
+  import('./components/CreativeStudioModes').then((m) => ({ default: m.CreativeStudioModes }))
+);
+const TemplatesPage = lazy(() =>
+  import('./components/TemplatesPage').then((m) => ({ default: m.TemplatesPage }))
+);
+const GalleryPage = lazy(() =>
+  import('./components/GalleryPage').then((m) => ({ default: m.GalleryPage }))
+);
+const SettingsPage = lazy(() =>
+  import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+);
+
 const PREF_STORAGE_KEY = 'camcall_preferences_v1';
+
+const KNOWN_PATH_VIEWS: Record<string, StudioView> = {
+  '/': 'home',
+  '/index.html': 'home',
+  '/photobooth': 'photobooth',
+  '/camera': 'photobooth',
+  '/filters': 'filters',
+  '/editor': 'editor',
+  '/collage': 'collage',
+  '/creative': 'creative',
+  '/creative-modes': 'creative-modes',
+  '/templates': 'templates',
+  '/gallery': 'gallery',
+  '/settings': 'settings',
+};
+
+function resolveInitialView(): StudioView {
+  if (typeof window === 'undefined') return 'home';
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('autostart') === '1') return 'photobooth';
+  const cleanPath = window.location.pathname.replace(/\/+$/, '') || '/';
+  return KNOWN_PATH_VIEWS[cleanPath] || 'not-found';
+}
 
 interface BoothNavConfig {
   initialMode?: CameraModeId;
@@ -42,13 +90,7 @@ function AppContent() {
   const { t } = useSettings();
   const { stopStream } = useCameraEngine();
 
-  const [activeView, setActiveView] = useState<StudioView>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('autostart') === '1') return 'photobooth';
-    }
-    return 'home';
-  });
+  const [activeView, setActiveView] = useState<StudioView>(resolveInitialView);
   const [prevView, setPrevView] = useState<StudioView>('home');
 
   const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null);
@@ -56,6 +98,8 @@ function AppContent() {
   const [editorFilterId, setEditorFilterId] = useState<string | null>(null);
   const [editorFilterIntensity, setEditorFilterIntensity] = useState<number>(100);
   const [editorProject, setEditorProject] = useState<LocalProjectRecord | null>(null);
+  const [collageProject, setCollageProject] = useState<LocalProjectRecord | null>(null);
+  const [boothProject, setBoothProject] = useState<LocalProjectRecord | null>(null);
   const [collectionProject, setCollectionProject] = useState<LocalProjectRecord | null>(null);
   const [creativeModeProject, setCreativeModeProject] = useState<LocalProjectRecord | null>(null);
   const [creativeMode, setCreativeMode] = useState<CreativeModeId>('polaroid');
@@ -99,6 +143,10 @@ function AppContent() {
 
   const navigateTo = useCallback(
     (view: StudioView, payload?: Partial<StudioNavigationPayload>) => {
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        window.history.replaceState({}, '', `/${window.location.search}`);
+      }
+
       if (view === 'about') {
         stopStream();
         setActiveView('home');
@@ -113,6 +161,7 @@ function AppContent() {
       }
 
       if (view === 'photobooth' && payload) {
+        setBoothProject(null);
         setBoothNavConfig({
           initialMode: payload.cameraMode,
           initialTab: payload.boothTab,
@@ -143,6 +192,7 @@ function AppContent() {
   };
 
   const handleStartWithTemplate = (templateId: PhotoboothTemplateId) => {
+    setBoothProject(null);
     setBoothTemplateId(templateId);
     setBoothNavConfig({});
     setBoothNavKey((k) => k + 1);
@@ -189,6 +239,7 @@ function AppContent() {
       navigateTo('creative-modes');
       return;
     }
+    setBoothProject(null);
     setBoothNavConfig({
       initialMode: 'photobooth',
       initialTab: 'themes',
@@ -219,8 +270,12 @@ function AppContent() {
       setCreativeModeProject(project);
       navigateTo('creative-modes');
     } else if (project.kind === 'collage') {
+      setCollageProject(project);
       navigateTo('collage');
     } else {
+      setBoothProject(project);
+      setBoothNavConfig({});
+      setBoothNavKey((k) => k + 1);
       navigateTo('photobooth');
     }
   };
@@ -231,85 +286,94 @@ function AppContent() {
 
       <main className="flex-1 flex flex-col">
         <div key={activeView} className="studio-view-enter flex-1 flex flex-col">
-          {activeView === 'home' && (
-            <HomePage
-              onNavigate={navigateTo}
-              onStartWithFilter={handleStartWithFilter}
-              onStartWithTemplate={handleStartWithTemplate}
-            />
-          )}
+          <Suspense fallback={<CamcallLoadingScreen />}>
+            {activeView === 'home' && (
+              <HomePage
+                onNavigate={navigateTo}
+                onStartWithFilter={handleStartWithFilter}
+                onStartWithTemplate={handleStartWithTemplate}
+              />
+            )}
 
-          {activeView === 'photobooth' && (
-            <PhotoboothStudio
-              key={`booth-${boothNavKey}`}
-              initialTemplateId={boothTemplateId}
-              initialMode={boothNavConfig.initialMode}
-              initialTab={boothNavConfig.initialTab}
-              initialFaceCategory={boothNavConfig.initialFaceCategory}
-              initialBoothThemeId={boothNavConfig.initialBoothThemeId}
-              initialLayoutId={boothNavConfig.initialLayoutId}
-              initialShapeId={boothNavConfig.initialShapeId}
-              onEditFrame={handleEditFrame}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'photobooth' && (
+              <PhotoboothStudio
+                key={`booth-${boothNavKey}`}
+                initialTemplateId={boothTemplateId}
+                initialMode={boothNavConfig.initialMode}
+                initialTab={boothNavConfig.initialTab}
+                initialFaceCategory={boothNavConfig.initialFaceCategory}
+                initialBoothThemeId={boothNavConfig.initialBoothThemeId}
+                initialLayoutId={boothNavConfig.initialLayoutId}
+                initialShapeId={boothNavConfig.initialShapeId}
+                initialProject={boothProject}
+                onEditFrame={handleEditFrame}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'filters' && (
-            <FilterLibrary
-              initialFilterId={selectedFilterId}
-              onApplyToEditor={handleApplyFilterToEditor}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'filters' && (
+              <FilterLibrary
+                initialFilterId={selectedFilterId}
+                onApplyToEditor={handleApplyFilterToEditor}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'editor' && (
-            <PhotoEditor
-              initialImageSrc={editorImageSrc}
-              initialFilterId={editorFilterId}
-              initialFilterIntensity={editorFilterIntensity}
-              initialProject={editorProject}
-              onBack={() => navigateTo(prevView === 'editor' ? 'home' : prevView)}
-              onSaveCreation={handleSaveCreation}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'editor' && (
+              <PhotoEditor
+                initialImageSrc={editorImageSrc}
+                initialFilterId={editorFilterId}
+                initialFilterIntensity={editorFilterIntensity}
+                initialProject={editorProject}
+                onBack={() =>
+                  navigateTo(prevView === 'editor' || prevView === 'not-found' ? 'home' : prevView)
+                }
+                onSaveCreation={handleSaveCreation}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'collage' && <CollageMaker onNotify={notify} />}
+            {activeView === 'collage' && (
+              <CollageMaker initialProject={collageProject} onNotify={notify} />
+            )}
 
-          {activeView === 'creative' && (
-            <CreativeCollectionStudio
-              initialProject={collectionProject}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'creative' && (
+              <CreativeCollectionStudio
+                initialProject={collectionProject}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'creative-modes' && (
-            <CreativeStudioModes
-              initialMode={creativeMode}
-              initialProject={creativeModeProject}
-              onOpenScrapbookStudio={() => navigateTo('creative')}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'creative-modes' && (
+              <CreativeStudioModes
+                initialMode={creativeMode}
+                initialProject={creativeModeProject}
+                onOpenScrapbookStudio={() => navigateTo('creative')}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'templates' && (
-            <TemplatesPage onUseTemplate={handleUseTemplate} onNotify={notify} />
-          )}
+            {activeView === 'templates' && (
+              <TemplatesPage onUseTemplate={handleUseTemplate} onNotify={notify} />
+            )}
 
-          {activeView === 'gallery' && (
-            <GalleryPage
-              onOpenPhotoInEditor={handleOpenPhotoInEditor}
-              onOpenProject={handleOpenProject}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'gallery' && (
+              <GalleryPage
+                onOpenPhotoInEditor={handleOpenPhotoInEditor}
+                onOpenProject={handleOpenProject}
+                onNotify={notify}
+              />
+            )}
 
-          {activeView === 'settings' && (
-            <SettingsPage
-              onClearSessionPhotos={() => setSavedCreations([])}
-              onNotify={notify}
-            />
-          )}
+            {activeView === 'settings' && (
+              <SettingsPage
+                onClearSessionPhotos={() => setSavedCreations([])}
+                onNotify={notify}
+              />
+            )}
+
+            {activeView === 'not-found' && <NotFoundPage onNavigate={navigateTo} />}
+          </Suspense>
         </div>
 
         {savedCreations.length > 0 && activeView === 'editor' && (
@@ -323,7 +387,10 @@ function AppContent() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setEditorImageSrc(item.dataUrl)}
+                    onClick={() => {
+                      setEditorProject(null);
+                      setEditorImageSrc(item.dataUrl);
+                    }}
                     className="shrink-0 w-24 text-left group cursor-pointer"
                   >
                     <div className="aspect-square rounded-xl overflow-hidden border border-[#f3d5e5] group-hover:border-[#db2777] bg-white">

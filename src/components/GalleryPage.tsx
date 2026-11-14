@@ -26,6 +26,7 @@ import {
   saveProjectToDb,
   togglePhotoFavoriteDb,
 } from '../utils/localDb';
+import { CamcallLogo } from './CamcallLogo';
 
 interface GalleryPageProps {
   onOpenPhotoInEditor: (dataUrl: string) => void;
@@ -63,6 +64,15 @@ export function GalleryPage({
   useEffect(() => {
     refreshData();
   }, [refreshData]);
+
+  useEffect(() => {
+    if (!confirmClear) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmClear(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmClear]);
 
   const handleDownloadPhoto = (photo: GalleryPhotoRecord) => {
     const link = document.createElement('a');
@@ -150,12 +160,15 @@ export function GalleryPage({
       />
 
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.gallery.kicker}</p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-            {t.gallery.title}
-          </h1>
-          <p className="text-sm opacity-75 mt-1">{t.gallery.subtitle}</p>
+        <div className="flex items-start gap-3">
+          <CamcallLogo variant="badge" size="md" className="mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-[#db2777] mb-1">{t.gallery.kicker}</p>
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+              {t.gallery.title}
+            </h1>
+            <p className="text-sm opacity-75 mt-1">{t.gallery.subtitle}</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -252,7 +265,7 @@ export function GalleryPage({
                     onClick={() => onOpenPhotoInEditor(photo.dataUrl)}
                     className="py-1.5 px-2 rounded-lg camcall-surface-soft border text-[11px] font-semibold cursor-pointer"
                   >
-                    Edit
+                    {t.gallery.editPhoto}
                   </button>
                   <button
                     type="button"

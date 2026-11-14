@@ -72,6 +72,8 @@
   --camcall-surface-soft: #281d2c;
   --camcall-accent: #f472b6;
   --camcall-accent-hover: #ec4899;
+  --camcall-btn-bg: #db2777;
+  --camcall-btn-hover: #be185d;
   --camcall-secondary: #a78bfa;
   --camcall-ink: #fdf2f8;
   --camcall-muted: #d6b8ca;
@@ -128,12 +130,12 @@
 }
 
 .camcall-btn-primary {
-  background-color: var(--camcall-accent);
+  background-color: var(--camcall-btn-bg, var(--camcall-accent));
   color: #ffffff;
 }
 
 .camcall-btn-primary:hover {
-  background-color: var(--camcall-accent-hover);
+  background-color: var(--camcall-btn-hover, var(--camcall-accent-hover));
 }
 
 /* Custom subtle scrollbars for studio panels */
