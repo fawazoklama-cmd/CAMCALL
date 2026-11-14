@@ -7,6 +7,37 @@ import type {
 import type { FilterConfig } from '../types/studio';
 import { clamp } from './imageProcessing';
 
+let cachedScratchCanvas: HTMLCanvasElement | null = null;
+function getScratchCanvas(width: number, height: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!cachedScratchCanvas) {
+    cachedScratchCanvas = document.createElement('canvas');
+  }
+  if (cachedScratchCanvas.width !== width || cachedScratchCanvas.height !== height) {
+    cachedScratchCanvas.width = width;
+    cachedScratchCanvas.height = height;
+  }
+  return cachedScratchCanvas;
+}
+
+function drawRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
 function drawStarShape(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -437,8 +468,14 @@ export function drawFaceFiltersOnCanvas(
       ctx.strokeStyle = '#FDE047';
       ctx.lineWidth = 2.5;
       for (const side of [-1, 1]) {
-        ctx.beginPath();
-        ctx.roundRect(side * eyeSpan * 0.5 - eyeSpan * 0.34, -eyeSpan * 0.2, eyeSpan * 0.68, eyeSpan * 0.42, eyeSpan * 0.12);
+        drawRoundedRectPath(
+          ctx,
+          side * eyeSpan * 0.5 - eyeSpan * 0.34,
+          -eyeSpan * 0.2,
+          eyeSpan * 0.68,
+          eyeSpan * 0.42,
+          eyeSpan * 0.12
+        );
         ctx.fill();
         ctx.stroke();
       }
@@ -798,14 +835,20 @@ export function applyLiveCameraEffects(
     ctx.restore();
   }
 
-  // Dreamy Blur / Soft Glow bloom pass
+  // Dreamy Blur / Soft Glow bloom pass (copy to scratch canvas first for cross-browser safety)
   if (effects.includes('dreamy-blur') || effects.includes('soft-glow')) {
-    ctx.save();
-    ctx.globalAlpha = effects.includes('dreamy-blur') ? 0.36 : 0.25;
-    ctx.globalCompositeOperation = 'screen';
-    ctx.filter = effects.includes('dreamy-blur') ? 'blur(8px)' : 'blur(4px)';
-    ctx.drawImage(ctx.canvas, 0, 0);
-    ctx.restore();
+    const scratch = getScratchCanvas(width, height);
+    const sctx = scratch?.getContext('2d');
+    if (scratch && sctx) {
+      sctx.clearRect(0, 0, width, height);
+      sctx.drawImage(ctx.canvas, 0, 0);
+      ctx.save();
+      ctx.globalAlpha = effects.includes('dreamy-blur') ? 0.36 : 0.25;
+      ctx.globalCompositeOperation = 'screen';
+      ctx.filter = effects.includes('dreamy-blur') ? 'blur(8px)' : 'blur(4px)';
+      ctx.drawImage(scratch, 0, 0);
+      ctx.restore();
+    }
   }
 
   // RGB Split / Chromatic Aberration channel shift
@@ -831,11 +874,10 @@ export function applyLiveCameraEffects(
     const scale = 0.32;
     const smallW = Math.max(40, Math.round(width * scale));
     const smallH = Math.max(40, Math.round(height * scale));
-    const temp = document.createElement('canvas');
-    temp.width = smallW;
-    temp.height = smallH;
-    const tctx = temp.getContext('2d');
-    if (tctx) {
+    const temp = getScratchCanvas(smallW, smallH);
+    const tctx = temp?.getContext('2d');
+    if (temp && tctx) {
+      tctx.clearRect(0, 0, smallW, smallH);
       tctx.drawImage(ctx.canvas, 0, 0, smallW, smallH);
       ctx.save();
       ctx.imageSmoothingEnabled = false;
@@ -1008,6 +1050,65 @@ export interface LiveRenderOptions {
   anchors: FaceAnchorSet[];
   timeSec: number;
   prevFrameCanvas?: HTMLCanvasElement | null;
+}
+
+export function prepareCleanTrackingCanvas(
+  trackingCanvas: HTMLCanvasElement,
+  source: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement,
+  aspectRatio: number,
+  mirror: boolean,
+  zoom: number
+): boolean {
+  const srcW =
+    source instanceof HTMLVideoElement
+      ? source.videoWidth
+      : source instanceof HTMLImageElement
+        ? source.naturalWidth || source.width
+        : source.width;
+  const srcH =
+    source instanceof HTMLVideoElement
+      ? source.videoHeight
+      : source instanceof HTMLImageElement
+        ? source.naturalHeight || source.height
+        : source.height;
+
+  if (!srcW || !srcH) return false;
+
+  const baseW = 480;
+  const outW = aspectRatio >= 1 ? baseW : Math.round(baseW * aspectRatio);
+  const outH = aspectRatio >= 1 ? Math.round(baseW / aspectRatio) : baseW;
+
+  if (trackingCanvas.width !== outW || trackingCanvas.height !== outH) {
+    trackingCanvas.width = outW;
+    trackingCanvas.height = outH;
+  }
+
+  const ctx = trackingCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+
+  const srcRatio = srcW / srcH;
+  let cropW = srcW;
+  let cropH = srcH;
+  if (srcRatio > aspectRatio) {
+    cropW = srcH * aspectRatio;
+  } else {
+    cropH = srcW / aspectRatio;
+  }
+
+  const safeZoom = clamp(zoom, 1, 2.5);
+  const zoomedW = cropW / safeZoom;
+  const zoomedH = cropH / safeZoom;
+  const sx = (srcW - zoomedW) / 2;
+  const sy = (srcH - zoomedH) / 2;
+
+  ctx.save();
+  if (mirror) {
+    ctx.translate(outW, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(source, sx, sy, zoomedW, zoomedH, 0, 0, outW, outH);
+  ctx.restore();
+  return true;
 }
 
 /**

@@ -60,7 +60,7 @@ import type {
 import type { ExportOptions, PhotoboothTemplateId } from '../types/studio';
 import { downloadCanvasAsImage, loadHtmlImage } from '../utils/canvasRenderer';
 import { detectFaceAnchors, initFaceTracker } from '../utils/faceTracker';
-import { renderLiveCameraFrame } from '../utils/liveCameraPipeline';
+import { prepareCleanTrackingCanvas, renderLiveCameraFrame } from '../utils/liveCameraPipeline';
 import { aspectRatioToNumber, pickRandomBoothConfig } from '../utils/photoboothLayout';
 import { renderUltimatePhotoboothToCanvas } from '../utils/photoboothRenderer';
 import { ExportControls } from './ExportControls';
@@ -176,6 +176,7 @@ export function PhotoboothStudio({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const trackingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prevFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const stripCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const demoImageRef = useRef<HTMLImageElement | null>(null);
@@ -260,6 +261,14 @@ export function PhotoboothStudio({
       stopStream();
     };
   }, [stopStream]);
+
+  useEffect(() => {
+    return () => {
+      if (recordedVideoUrl) {
+        URL.revokeObjectURL(recordedVideoUrl);
+      }
+    };
+  }, [recordedVideoUrl]);
 
   // Apply hardware zoom if supported by active video track
   useEffect(() => {
@@ -357,22 +366,27 @@ export function PhotoboothStudio({
           ? source.readyState >= 2 && source.videoWidth > 0
           : Boolean(source && source.complete && source.naturalWidth > 0);
 
+      if (!trackingCanvasRef.current) {
+        trackingCanvasRef.current = document.createElement('canvas');
+      }
+
       if (canvas && source && sourceReady) {
         const timeSec = nowMs / 1000;
+        const aspectNum = aspectRatioToNumber(aspectRatio);
         const shouldMirror =
-          cameraState === 'active' ? mirrorPreview && (facingMode === 'user' || cameraMode === 'mirror') : mirrorPreview && cameraMode === 'mirror';
+          cameraState === 'active'
+            ? mirrorPreview && (facingMode === 'user' || cameraMode === 'mirror')
+            : mirrorPreview && cameraMode === 'mirror';
 
-        // Throttle MediaPipe detection to ~15fps for buttery preview FPS
+        // Throttle MediaPipe detection to ~15fps on clean cropped/mirrored/zoomed frame
         if (activeFaceFilters.length > 0 && nowMs - lastDetectTsRef.current > 65) {
           lastDetectTsRef.current = nowMs;
-          if (source instanceof HTMLVideoElement) {
-            anchorsRef.current = detectFaceAnchors(source, {
-              mirrorX: shouldMirror,
-              timeSec,
-              allowFallback: true,
-            });
-          } else {
-            anchorsRef.current = detectFaceAnchors(canvas, {
+          const trackCanvas = trackingCanvasRef.current;
+          if (
+            trackCanvas &&
+            prepareCleanTrackingCanvas(trackCanvas, source, aspectNum, shouldMirror, zoomLevel)
+          ) {
+            anchorsRef.current = detectFaceAnchors(trackCanvas, {
               mirrorX: false,
               timeSec,
               allowFallback: true,
@@ -381,7 +395,7 @@ export function PhotoboothStudio({
         }
 
         renderLiveCameraFrame(canvas, source, {
-          aspectRatio: aspectRatioToNumber(aspectRatio),
+          aspectRatio: aspectNum,
           mirror: shouldMirror,
           zoom: zoomLevel,
           filter: activeFilter,
@@ -561,7 +575,13 @@ export function PhotoboothStudio({
     if (countdown !== null || isShootingSequence) return;
     burstAbortRef.current = false;
 
-    if (cameraMode === 'photo' || cameraMode === 'mirror' || cameraMode === 'timer' || cameraMode === 'random') {
+    if (
+      retakeIndex !== null ||
+      cameraMode === 'photo' ||
+      cameraMode === 'mirror' ||
+      cameraMode === 'timer' ||
+      cameraMode === 'random'
+    ) {
       const wait = cameraMode === 'timer' ? Math.max(3, countdownSeconds) : countdownSeconds;
       const ok = await runCountdown(wait);
       if (!ok) return;
@@ -569,7 +589,7 @@ export function PhotoboothStudio({
       const shot = captureLiveCanvasFrame();
       if (shot) {
         placeCapturedFrame(shot, retakeIndex);
-        onNotify('Frame captured with live effects & AR!');
+        onNotify(retakeIndex !== null ? `Retook frame #${retakeIndex + 1}!` : 'Frame captured with live effects & AR!');
       }
       return;
     }
