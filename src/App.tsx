@@ -1,18 +1,47 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CollageMaker } from './components/CollageMaker';
 import { CreativeCollectionStudio } from './components/CreativeCollectionStudio';
+import { CreativeStudioModes } from './components/CreativeStudioModes';
 import { FilterLibrary } from './components/FilterLibrary';
 import { Footer } from './components/Footer';
+import { GalleryPage } from './components/GalleryPage';
 import { HomePage } from './components/HomePage';
-import { Navbar } from './components/Navbar';
+import {
+  Navbar,
+  type CreativeModeId,
+  type StudioNavigationPayload,
+} from './components/Navbar';
 import { PhotoEditor } from './components/PhotoEditor';
-import { PhotoboothStudio } from './components/PhotoboothStudio';
+import { PhotoboothStudio, type LeftToolTab } from './components/PhotoboothStudio';
+import { SettingsPage } from './components/SettingsPage';
+import { TemplatesPage, type StudioTemplateEntry } from './components/TemplatesPage';
 import { ToastContainer, type ToastMessage } from './components/Toast';
+import { CameraEngineProvider, useCameraEngine } from './context/CameraEngineContext';
+import { SettingsProvider, useSettings } from './context/SettingsContext';
+import type {
+  BoothLayoutId,
+  BoothShapeId,
+  CameraModeId,
+  FaceFilterCategory,
+} from './types/photobooth';
+import type { LocalProjectRecord } from './types/settings';
 import type { PhotoboothTemplateId, SavedCreation, StudioView } from './types/studio';
 
 const PREF_STORAGE_KEY = 'camcall_preferences_v1';
 
-export default function App() {
+interface BoothNavConfig {
+  initialMode?: CameraModeId;
+  initialTab?: LeftToolTab;
+  initialFaceCategory?: FaceFilterCategory;
+  initialBoothThemeId?: string;
+  initialLayoutId?: BoothLayoutId;
+  initialShapeId?: BoothShapeId;
+}
+
+function AppContent() {
+  const { t } = useSettings();
+  const { stopStream } = useCameraEngine();
+
   const [activeView, setActiveView] = useState<StudioView>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -26,12 +55,18 @@ export default function App() {
   const [editorImageSrc, setEditorImageSrc] = useState<string | null>(null);
   const [editorFilterId, setEditorFilterId] = useState<string | null>(null);
   const [editorFilterIntensity, setEditorFilterIntensity] = useState<number>(100);
+  const [editorProject, setEditorProject] = useState<LocalProjectRecord | null>(null);
+  const [collectionProject, setCollectionProject] = useState<LocalProjectRecord | null>(null);
+  const [creativeModeProject, setCreativeModeProject] = useState<LocalProjectRecord | null>(null);
+  const [creativeMode, setCreativeMode] = useState<CreativeModeId>('polaroid');
+
   const [boothTemplateId, setBoothTemplateId] = useState<PhotoboothTemplateId>('classic-korean');
+  const [boothNavConfig, setBoothNavConfig] = useState<BoothNavConfig>({});
+  const [boothNavKey, setBoothNavKey] = useState<number>(0);
 
   const [savedCreations, setSavedCreations] = useState<SavedCreation[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Restore lightweight template preference from localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem(PREF_STORAGE_KEY);
@@ -58,24 +93,48 @@ export default function App() {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setToasts([{ id, message, kind }]);
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
+      setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 3200);
   }, []);
 
   const navigateTo = useCallback(
-    (view: StudioView) => {
+    (view: StudioView, payload?: Partial<StudioNavigationPayload>) => {
       if (view === 'about') {
+        stopStream();
         setActiveView('home');
         setTimeout(() => {
           document.getElementById('about-section')?.scrollIntoView({ behavior: 'smooth' });
         }, 80);
         return;
       }
+
+      if (view !== 'photobooth' && view !== 'filters') {
+        stopStream();
+      }
+
+      if (view === 'photobooth' && payload) {
+        setBoothNavConfig({
+          initialMode: payload.cameraMode,
+          initialTab: payload.boothTab,
+          initialFaceCategory: payload.faceCategory,
+        });
+        setBoothNavKey((k) => k + 1);
+      } else if (view === 'creative-modes' && payload?.creativeMode) {
+        if (payload.creativeMode === 'scrapbook') {
+          setPrevView(activeView);
+          setActiveView('creative');
+          window.scrollTo({ top: 0, behavior: 'auto' });
+          return;
+        }
+        setCreativeModeProject(null);
+        setCreativeMode(payload.creativeMode);
+      }
+
       setPrevView(activeView);
       setActiveView(view);
       window.scrollTo({ top: 0, behavior: 'auto' });
     },
-    [activeView]
+    [activeView, stopStream]
   );
 
   const handleStartWithFilter = (filterId: string) => {
@@ -85,6 +144,8 @@ export default function App() {
 
   const handleStartWithTemplate = (templateId: PhotoboothTemplateId) => {
     setBoothTemplateId(templateId);
+    setBoothNavConfig({});
+    setBoothNavKey((k) => k + 1);
     navigateTo('photobooth');
   };
 
@@ -93,6 +154,7 @@ export default function App() {
     filterId: string,
     intensity: number
   ) => {
+    setEditorProject(null);
     setEditorImageSrc(imageSrc);
     setEditorFilterId(filterId);
     setEditorFilterIntensity(intensity);
@@ -100,6 +162,7 @@ export default function App() {
   };
 
   const handleEditFrame = (imageSrc: string) => {
+    setEditorProject(null);
     setEditorImageSrc(imageSrc);
     setEditorFilterId(null);
     setEditorFilterIntensity(100);
@@ -119,8 +182,51 @@ export default function App() {
     ]);
   };
 
+  const handleUseTemplate = (tpl: StudioTemplateEntry) => {
+    if (tpl.target === 'creative-modes') {
+      setCreativeModeProject(null);
+      setCreativeMode(tpl.creativeMode || 'polaroid');
+      navigateTo('creative-modes');
+      return;
+    }
+    setBoothNavConfig({
+      initialMode: 'photobooth',
+      initialTab: 'themes',
+      initialBoothThemeId: tpl.boothThemeId,
+      initialLayoutId: tpl.boothLayoutId,
+      initialShapeId: tpl.boothShapeId,
+    });
+    setBoothNavKey((k) => k + 1);
+    navigateTo('photobooth');
+  };
+
+  const handleOpenPhotoInEditor = (dataUrl: string) => {
+    setEditorProject(null);
+    setEditorImageSrc(dataUrl);
+    setEditorFilterId(null);
+    setEditorFilterIntensity(100);
+    navigateTo('editor');
+  };
+
+  const handleOpenProject = (project: LocalProjectRecord) => {
+    if (project.kind === 'editor') {
+      setEditorProject(project);
+      navigateTo('editor');
+    } else if (project.kind === 'creative') {
+      setCollectionProject(project);
+      navigateTo('creative');
+    } else if (project.kind === 'creative-mode') {
+      setCreativeModeProject(project);
+      navigateTo('creative-modes');
+    } else if (project.kind === 'collage') {
+      navigateTo('collage');
+    } else {
+      navigateTo('photobooth');
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#fffdfe] text-[#2d1b28]">
+    <div className="min-h-screen flex flex-col camcall-app-shell">
       <Navbar activeView={activeView} onNavigate={navigateTo} />
 
       <main className="flex-1 flex flex-col">
@@ -135,7 +241,14 @@ export default function App() {
 
           {activeView === 'photobooth' && (
             <PhotoboothStudio
+              key={`booth-${boothNavKey}`}
               initialTemplateId={boothTemplateId}
+              initialMode={boothNavConfig.initialMode}
+              initialTab={boothNavConfig.initialTab}
+              initialFaceCategory={boothNavConfig.initialFaceCategory}
+              initialBoothThemeId={boothNavConfig.initialBoothThemeId}
+              initialLayoutId={boothNavConfig.initialLayoutId}
+              initialShapeId={boothNavConfig.initialShapeId}
               onEditFrame={handleEditFrame}
               onNotify={notify}
             />
@@ -154,6 +267,7 @@ export default function App() {
               initialImageSrc={editorImageSrc}
               initialFilterId={editorFilterId}
               initialFilterIntensity={editorFilterIntensity}
+              initialProject={editorProject}
               onBack={() => navigateTo(prevView === 'editor' ? 'home' : prevView)}
               onSaveCreation={handleSaveCreation}
               onNotify={notify}
@@ -162,15 +276,47 @@ export default function App() {
 
           {activeView === 'collage' && <CollageMaker onNotify={notify} />}
 
-          {activeView === 'creative' && <CreativeCollectionStudio onNotify={notify} />}
+          {activeView === 'creative' && (
+            <CreativeCollectionStudio
+              initialProject={collectionProject}
+              onNotify={notify}
+            />
+          )}
+
+          {activeView === 'creative-modes' && (
+            <CreativeStudioModes
+              initialMode={creativeMode}
+              initialProject={creativeModeProject}
+              onOpenScrapbookStudio={() => navigateTo('creative')}
+              onNotify={notify}
+            />
+          )}
+
+          {activeView === 'templates' && (
+            <TemplatesPage onUseTemplate={handleUseTemplate} onNotify={notify} />
+          )}
+
+          {activeView === 'gallery' && (
+            <GalleryPage
+              onOpenPhotoInEditor={handleOpenPhotoInEditor}
+              onOpenProject={handleOpenProject}
+              onNotify={notify}
+            />
+          )}
+
+          {activeView === 'settings' && (
+            <SettingsPage
+              onClearSessionPhotos={() => setSavedCreations([])}
+              onNotify={notify}
+            />
+          )}
         </div>
 
-        {/* Session Saved Creations Shelf (only appears after user saves a creation) */}
         {savedCreations.length > 0 && activeView === 'editor' && (
           <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pb-8">
-            <div className="rounded-2xl bg-[#fdf2f8] border border-[#f3d5e5] p-4">
-              <h2 className="font-display text-sm font-bold text-[#2d1b28] mb-3">
-                Saved in This Session ({savedCreations.length})
+            <div className="rounded-2xl camcall-surface-soft border p-4">
+              <h2 className="font-display text-sm font-bold mb-3">
+                {t.gallery.tabs.photos} ({savedCreations.length})
               </h2>
               <div className="flex gap-3 overflow-x-auto pb-1">
                 {savedCreations.map((item) => (
@@ -187,9 +333,7 @@ export default function App() {
                         className="w-full h-full object-cover"
                       />
                     </div>
-                    <p className="text-[11px] font-medium text-[#2d1b28] truncate mt-1">
-                      {item.title}
-                    </p>
+                    <p className="text-[11px] font-medium truncate mt-1">{item.title}</p>
                   </button>
                 ))}
               </div>
@@ -202,8 +346,18 @@ export default function App() {
 
       <ToastContainer
         toasts={toasts}
-        onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+        onDismiss={(id) => setToasts((prev) => prev.filter((item) => item.id !== id))}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <SettingsProvider>
+      <CameraEngineProvider>
+        <AppContent />
+      </CameraEngineProvider>
+    </SettingsProvider>
   );
 }

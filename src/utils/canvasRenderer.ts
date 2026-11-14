@@ -102,16 +102,29 @@ function applyPixelEffects(
     fade: number;
     sharpness: number;
     grain: number;
+    highlights?: number;
+    shadows?: number;
   }
 ) {
-  const { temperature, pinkTint, lavenderTint, fade, sharpness, grain } = options;
+  const {
+    temperature,
+    pinkTint,
+    lavenderTint,
+    fade,
+    sharpness,
+    grain,
+    highlights = 0,
+    shadows = 0,
+  } = options;
   const needsPixelPass =
     Math.abs(temperature) > 0.5 ||
     pinkTint > 0.005 ||
     lavenderTint > 0.005 ||
     fade > 0.005 ||
     sharpness > 1 ||
-    grain > 0.01;
+    grain > 0.01 ||
+    Math.abs(highlights) > 1 ||
+    Math.abs(shadows) > 1;
 
   if (!needsPixelPass) return;
 
@@ -170,6 +183,17 @@ function applyPixelEffects(
     // Pink & Lavender tints
     r += pinkR + lavR;
     b += pinkB + lavB;
+
+    // Highlights & Shadows tone curve
+    if (Math.abs(highlights) > 1 || Math.abs(shadows) > 1) {
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      const hiWeight = Math.max(0, (lum - 0.5) * 2);
+      const shWeight = Math.max(0, (0.5 - lum) * 2);
+      const toneDelta = (highlights * 0.55 * hiWeight) + (shadows * 0.55 * shWeight);
+      r += toneDelta;
+      g += toneDelta;
+      b += toneDelta;
+    }
 
     // Grain
     if (grainStrength > 0.5) {
@@ -415,6 +439,8 @@ export function renderEditedPhotoToCanvas(
     fade: resolved.fade,
     sharpness: adjustments.sharpness,
     grain: clamp(adjustments.grain / 100 + resolved.grain, 0, 1),
+    highlights: adjustments.highlights ?? 0,
+    shadows: adjustments.shadows ?? 0,
   });
 
   // Vignette

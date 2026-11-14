@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
@@ -18,18 +19,121 @@
   --color-studio-border: #f3d5e5;
 }
 
+:root {
+  --camcall-canvas: #fffdfe;
+  --camcall-surface: #ffffff;
+  --camcall-surface-soft: #fdf2f8;
+  --camcall-accent: #db2777;
+  --camcall-accent-hover: #be185d;
+  --camcall-secondary: #7c3aed;
+  --camcall-ink: #2d1b28;
+  --camcall-muted: #6e4f62;
+  --camcall-border: #f3d5e5;
+  --camcall-glass-alpha: 0.9;
+}
+
+:root[data-theme="soft-pink"] {
+  --camcall-canvas: #fff9fc;
+  --camcall-surface: #ffffff;
+  --camcall-surface-soft: #fef1f7;
+  --camcall-accent: #ec4899;
+  --camcall-accent-hover: #db2777;
+  --camcall-border: #f9d8e8;
+}
+
+:root[data-theme="lavender"] {
+  --camcall-canvas: #fbfaff;
+  --camcall-surface: #ffffff;
+  --camcall-surface-soft: #f3f0ff;
+  --camcall-accent: #7c3aed;
+  --camcall-accent-hover: #6d28d9;
+  --camcall-secondary: #db2777;
+  --camcall-ink: #231936;
+  --camcall-muted: #5f5378;
+  --camcall-border: #ddd6fe;
+}
+
+:root[data-theme="white-minimalist"] {
+  --camcall-canvas: #fafafa;
+  --camcall-surface: #ffffff;
+  --camcall-surface-soft: #f4f4f5;
+  --camcall-accent: #be185d;
+  --camcall-accent-hover: #9d174d;
+  --camcall-secondary: #27272a;
+  --camcall-ink: #18181b;
+  --camcall-muted: #52525b;
+  --camcall-border: #e4e4e7;
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  --camcall-canvas: #120d14;
+  --camcall-surface: #1d1520;
+  --camcall-surface-soft: #281d2c;
+  --camcall-accent: #f472b6;
+  --camcall-accent-hover: #ec4899;
+  --camcall-secondary: #a78bfa;
+  --camcall-ink: #fdf2f8;
+  --camcall-muted: #d6b8ca;
+  --camcall-border: #3d2a40;
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);
-    color: var(--color-studio-ink);
-    background-color: var(--color-studio-canvas);
+    color: var(--camcall-ink);
+    background-color: var(--camcall-canvas);
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
+    font-size: 16px;
+  }
+
+  html[data-text-size="sm"] {
+    font-size: 14.5px;
+  }
+
+  html[data-text-size="md"] {
+    font-size: 16px;
+  }
+
+  html[data-text-size="lg"] {
+    font-size: 17.5px;
+  }
+
+  body {
+    background-color: var(--camcall-canvas);
+    color: var(--camcall-ink);
   }
 
   h1, h2, h3, .font-display {
     font-family: var(--font-display);
   }
+}
+
+.camcall-app-shell {
+  background-color: var(--camcall-canvas);
+  color: var(--camcall-ink);
+}
+
+.camcall-surface {
+  background-color: var(--camcall-surface);
+  border-color: var(--camcall-border);
+  color: var(--camcall-ink);
+}
+
+.camcall-surface-soft {
+  background-color: var(--camcall-surface-soft);
+  border-color: var(--camcall-border);
+  color: var(--camcall-ink);
+}
+
+.camcall-btn-primary {
+  background-color: var(--camcall-accent);
+  color: #ffffff;
+}
+
+.camcall-btn-primary:hover {
+  background-color: var(--camcall-accent-hover);
 }
 
 /* Custom subtle scrollbars for studio panels */
@@ -39,7 +143,7 @@
 }
 
 .studio-scroll::-webkit-scrollbar-track {
-  background: #fdf2f8;
+  background: var(--camcall-surface-soft);
   border-radius: 9999px;
 }
 
@@ -68,7 +172,7 @@ input[type="range"].studio-slider::-webkit-slider-thumb {
   width: 18px;
   height: 18px;
   border-radius: 9999px;
-  background: #db2777;
+  background: var(--camcall-accent);
   border: 2px solid #ffffff;
   box-shadow: 0 2px 6px rgba(219, 39, 119, 0.35);
   cursor: pointer;
@@ -83,7 +187,7 @@ input[type="range"].studio-slider::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 9999px;
-  background: #db2777;
+  background: var(--camcall-accent);
   border: 2px solid #ffffff;
   box-shadow: 0 2px 6px rgba(219, 39, 119, 0.35);
   cursor: pointer;
@@ -101,6 +205,15 @@ input[type="range"].studio-slider::-moz-range-thumb {
 
 .studio-view-enter {
   animation: studioViewEnter 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

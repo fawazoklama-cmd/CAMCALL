@@ -1,14 +1,13 @@
-import { ImagePlus, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Camera, FolderHeart, ImagePlus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useSettings } from '../context/SettingsContext';
 import { COLLAGE_BACKGROUNDS, COLLAGE_TEMPLATES } from '../data/presets';
 import { STUDIO_SAMPLE_PHOTOS } from '../data/sampleMedia';
-import type {
-  CanvasLayer,
-  CollagePhotoCount,
-  ExportOptions,
-} from '../types/studio';
+import type { CanvasLayer, CollagePhotoCount, ExportOptions } from '../types/studio';
 import { downloadCanvasAsImage, renderCollageToCanvas } from '../utils/canvasRenderer';
+import { recordHistoryDb, savePhotoToDb } from '../utils/localDb';
 import { ExportControls } from './ExportControls';
+import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 import { StickerStudioPanel } from './StickerStudioPanel';
 
 interface CollageMakerProps {
@@ -18,6 +17,7 @@ interface CollageMakerProps {
 const PHOTO_COUNTS: CollagePhotoCount[] = [2, 3, 4, 6, 9];
 
 export function CollageMaker({ onNotify }: CollageMakerProps) {
+  const { settings, t } = useSettings();
   const [selectedCount, setSelectedCount] = useState<CollagePhotoCount>(4);
   const [templateId, setTemplateId] = useState<string>('4-grid');
   const [photos, setPhotos] = useState<(string | null)[]>([
@@ -33,9 +33,11 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
   const [layers, setLayers] = useState<CanvasLayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<'layout' | 'decorate'>('layout');
+  const [cameraModalOpen, setCameraModalOpen] = useState<boolean>(false);
+  const [cameraSlotIndex, setCameraSlotIndex] = useState<number>(0);
 
   const [exportOptions, setExportOptions] = useState<ExportOptions>({
-    format: 'png',
+    format: settings.saveFormat,
     quality: 95,
   });
 
@@ -45,13 +47,15 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
   const targetSlotRef = useRef<number>(0);
   const draggingLayerRef = useRef<{ id: string } | null>(null);
 
-  const templatesForCount = COLLAGE_TEMPLATES.filter((t) => t.photoCount === selectedCount);
+  const templatesForCount = COLLAGE_TEMPLATES.filter((tItem) => tItem.photoCount === selectedCount);
   const activeTemplate =
-    COLLAGE_TEMPLATES.find((t) => t.id === templateId) || templatesForCount[0] || COLLAGE_TEMPLATES[0];
+    COLLAGE_TEMPLATES.find((tItem) => tItem.id === templateId) ||
+    templatesForCount[0] ||
+    COLLAGE_TEMPLATES[0];
 
   const handleSelectCount = (count: CollagePhotoCount) => {
     setSelectedCount(count);
-    const first = COLLAGE_TEMPLATES.find((t) => t.photoCount === count);
+    const first = COLLAGE_TEMPLATES.find((tItem) => tItem.photoCount === count);
     if (first) setTemplateId(first.id);
     setPhotos((prev) =>
       Array.from({ length: count }, (_, idx) => {
@@ -130,11 +134,25 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
     onNotify('Filled collage slots with studio samples.', 'info');
   };
 
+  const handleSaveToGallery = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    await savePhotoToDb({
+      title: `Collage ${selectedCount}-Shot`,
+      dataUrl: canvas.toDataURL('image/png'),
+      source: 'collage',
+      format: 'png',
+      favorite: false,
+    });
+    await recordHistoryDb('download', 'collage', `${selectedCount}-Shot Collage`);
+    onNotify(t.notifications.savedGallery);
+  };
+
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     downloadCanvasAsImage(canvas, `camcall-collage-${selectedCount}`, exportOptions);
-    onNotify(`Collage saved as ${exportOptions.format.toUpperCase()}!`);
+    onNotify(t.notifications.downloaded);
   };
 
   // Drag stickers/text directly on collage canvas
@@ -180,7 +198,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
   };
 
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-6">
+    <section className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-6">
       <input
         ref={multiUploadRef}
         type="file"
@@ -200,31 +218,48 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-[#db2777] mb-1">Digital Scrapbook</p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#2d1b28]">
-            Collage Maker
+          <p className="text-xs font-semibold text-[#db2777] mb-1">{t.collage.kicker}</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+            {t.collage.title}
           </h1>
-          <p className="text-sm text-[#6e4f62] mt-1">
-            Choose 2, 3, 4, 6, or 9 photo templates, customize spacing and pastel borders, add text & stickers.
-          </p>
+          <p className="text-sm opacity-75 mt-1">{t.collage.subtitle}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => multiUploadRef.current?.click()}
+            onClick={() => {
+              setCameraSlotIndex(0);
+              setCameraModalOpen(true);
+            }}
             className="min-h-[42px] px-4 py-2 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
           >
-            <Upload className="w-4 h-4" aria-hidden="true" />
-            <span>Upload Multiple Photos</span>
+            <Camera className="w-4 h-4" aria-hidden="true" />
+            <span>{t.camera.captureFromCamera}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => multiUploadRef.current?.click()}
+            className="min-h-[42px] px-4 py-2 rounded-xl camcall-surface border hover:border-[#db2777] text-xs sm:text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
+          >
+            <Upload className="w-4 h-4 text-[#db2777]" aria-hidden="true" />
+            <span>{t.collage.uploadMultiple}</span>
           </button>
           <button
             type="button"
             onClick={handleFillSamples}
-            className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white border border-[#f3d5e5] hover:border-[#db2777] text-xs sm:text-sm font-semibold text-[#2d1b28] inline-flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[42px] px-3.5 py-2 rounded-xl camcall-surface border hover:border-[#7c3aed] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-[#7c3aed]" aria-hidden="true" />
-            <span>Fill Samples</span>
+            <span>{t.collage.fillSamples}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveToGallery}
+            className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <FolderHeart className="w-4 h-4" aria-hidden="true" />
+            <span>{t.camera.saveToGallery}</span>
           </button>
         </div>
       </div>
@@ -233,8 +268,8 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Live Collage Canvas + Slot Manager */}
         <div className="lg:col-span-7 flex flex-col gap-5">
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
-            <div className="rounded-2xl bg-[#fdf2f8] border border-[#f3d5e5] p-3 flex items-center justify-center min-h-[340px] max-h-[540px]">
+          <div className="rounded-3xl camcall-surface border p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
+            <div className="rounded-2xl camcall-surface-soft border p-3 flex items-center justify-center min-h-[340px] max-h-[540px]">
               <canvas
                 ref={canvasRef}
                 data-testid="collage-preview-canvas"
@@ -245,21 +280,19 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                 className="max-w-full max-h-[490px] w-auto h-auto rounded-xl shadow-md touch-none cursor-grab active:cursor-grabbing"
               />
             </div>
-            <p className="text-xs text-[#6e4f62] text-center">
+            <p className="text-xs opacity-75 text-center">
               Drag stickers or text directly on the collage preview to reposition them.
             </p>
           </div>
 
           {/* Individual Photo Slots */}
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col gap-3">
-            <h2 className="font-display text-base font-bold text-[#2d1b28]">
-              Photo Slots ({selectedCount})
-            </h2>
+          <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
+            <h2 className="font-display text-base font-bold">Photo Slots ({selectedCount})</h2>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
               {photos.slice(0, selectedCount).map((src, idx) => (
                 <div
                   key={idx}
-                  className="rounded-xl border border-[#f3d5e5] p-1.5 flex flex-col gap-1.5 bg-[#fdf2f8]/60"
+                  className="rounded-xl border camcall-surface-soft p-1.5 flex flex-col gap-1.5"
                 >
                   <div className="aspect-square rounded-lg overflow-hidden bg-white flex items-center justify-center">
                     {src ? (
@@ -270,19 +303,30 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <span className="font-mono text-xs text-[#6e4f62]">#{idx + 1}</span>
+                      <span className="font-mono text-xs opacity-70">#{idx + 1}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      title={t.collage.captureSlot}
+                      onClick={() => {
+                        setCameraSlotIndex(idx);
+                        setCameraModalOpen(true);
+                      }}
+                      className="p-1 rounded-lg camcall-surface border hover:border-[#db2777] text-[#db2777] cursor-pointer"
+                    >
+                      <Camera className="w-3 h-3" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
                         targetSlotRef.current = idx;
                         slotUploadRef.current?.click();
                       }}
-                      className="flex-1 py-1 px-1.5 rounded-lg bg-white border border-[#f3d5e5] hover:border-[#db2777] text-[10px] font-semibold text-[#2d1b28] inline-flex items-center justify-center gap-1 cursor-pointer"
+                      className="flex-1 py-1 px-1 rounded-lg camcall-surface border hover:border-[#db2777] text-[10px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      <ImagePlus className="w-3 h-3 text-[#db2777]" aria-hidden="true" />
+                      <ImagePlus className="w-3 h-3 text-[#7c3aed]" aria-hidden="true" />
                       <span>Swap</span>
                     </button>
                     {src && (
@@ -292,7 +336,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                         onClick={() =>
                           setPhotos((prev) => prev.map((item, i) => (i === idx ? null : item)))
                         }
-                        className="p-1 rounded-lg bg-white border border-[#f3d5e5] text-[#6e4f62] hover:text-rose-600 cursor-pointer"
+                        className="p-1 rounded-lg camcall-surface border text-rose-500 cursor-pointer"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -306,16 +350,13 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
 
         {/* Right: Controls Sidebar */}
         <div className="lg:col-span-5 flex flex-col gap-4">
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col gap-4">
-            {/* Switch between Layout & Stickers/Text */}
-            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#fdf2f8] border border-[#f3d5e5]">
+          <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl camcall-surface-soft border">
               <button
                 type="button"
                 onClick={() => setActivePanel('layout')}
                 className={`min-h-[42px] rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
-                  activePanel === 'layout'
-                    ? 'bg-[#db2777] text-white'
-                    : 'text-[#6e4f62] hover:text-[#2d1b28]'
+                  activePanel === 'layout' ? 'bg-[#db2777] text-white' : 'opacity-80'
                 }`}
               >
                 Layout & Style
@@ -324,9 +365,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                 type="button"
                 onClick={() => setActivePanel('decorate')}
                 className={`min-h-[42px] rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
-                  activePanel === 'decorate'
-                    ? 'bg-[#db2777] text-white'
-                    : 'text-[#6e4f62] hover:text-[#2d1b28]'
+                  activePanel === 'decorate' ? 'bg-[#db2777] text-white' : 'opacity-80'
                 }`}
               >
                 Text & Stickers ({layers.length})
@@ -335,11 +374,8 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
 
             {activePanel === 'layout' ? (
               <div className="flex flex-col gap-4">
-                {/* Photo Count Tabs */}
                 <div>
-                  <span className="text-xs font-semibold text-[#2d1b28] block mb-2">
-                    Number of Photos
-                  </span>
+                  <span className="text-xs font-semibold block mb-2">Number of Photos</span>
                   <div className="grid grid-cols-5 gap-1.5">
                     {PHOTO_COUNTS.map((count) => (
                       <button
@@ -349,7 +385,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                         className={`py-2 rounded-xl text-xs font-mono font-semibold border cursor-pointer transition-colors ${
                           selectedCount === count
                             ? 'bg-[#db2777] text-white border-[#db2777]'
-                            : 'bg-[#fdf2f8] text-[#2d1b28] border-[#f3d5e5]'
+                            : 'camcall-surface-soft'
                         }`}
                       >
                         {count}
@@ -358,11 +394,8 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                   </div>
                 </div>
 
-                {/* Template variations */}
                 <div>
-                  <span className="text-xs font-semibold text-[#2d1b28] block mb-2">
-                    Grid Template
-                  </span>
+                  <span className="text-xs font-semibold block mb-2">Grid Template</span>
                   <div className="flex flex-col gap-1.5">
                     {templatesForCount.map((tpl) => (
                       <button
@@ -372,7 +405,7 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                         className={`px-3 py-2 rounded-xl border text-left text-xs font-semibold cursor-pointer transition-colors ${
                           activeTemplate.id === tpl.id
                             ? 'bg-[#fce7f3] border-[#db2777] text-[#be185d]'
-                            : 'bg-white border-[#f3d5e5] text-[#2d1b28] hover:border-[#f472b6]'
+                            : 'camcall-surface-soft hover:border-[#f472b6]'
                         }`}
                       >
                         {tpl.name}
@@ -381,14 +414,13 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                   </div>
                 </div>
 
-                {/* Spacing, Border, Radius Sliders */}
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1">
                     <div className="flex justify-between text-xs">
-                      <label htmlFor="collage-spacing" className="font-medium text-[#2d1b28]">
-                        Photo Spacing
+                      <label htmlFor="collage-spacing" className="font-medium">
+                        {t.collage.spacing}
                       </label>
-                      <span className="font-mono tabular-nums text-[#6e4f62]">{spacing}px</span>
+                      <span className="font-mono tabular-nums opacity-75">{spacing}px</span>
                     </div>
                     <input
                       id="collage-spacing"
@@ -403,10 +435,10 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
 
                   <div className="flex flex-col gap-1">
                     <div className="flex justify-between text-xs">
-                      <label htmlFor="collage-border" className="font-medium text-[#2d1b28]">
-                        Border Frame
+                      <label htmlFor="collage-border" className="font-medium">
+                        {t.collage.border}
                       </label>
-                      <span className="font-mono tabular-nums text-[#6e4f62]">{borderWidth}px</span>
+                      <span className="font-mono tabular-nums opacity-75">{borderWidth}px</span>
                     </div>
                     <input
                       id="collage-border"
@@ -421,10 +453,10 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
 
                   <div className="flex flex-col gap-1">
                     <div className="flex justify-between text-xs">
-                      <label htmlFor="collage-radius" className="font-medium text-[#2d1b28]">
-                        Corner Roundness
+                      <label htmlFor="collage-radius" className="font-medium">
+                        {t.collage.corners}
                       </label>
-                      <span className="font-mono tabular-nums text-[#6e4f62]">{cornerRadius}px</span>
+                      <span className="font-mono tabular-nums opacity-75">{cornerRadius}px</span>
                     </div>
                     <input
                       id="collage-radius"
@@ -438,11 +470,8 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
                   </div>
                 </div>
 
-                {/* Background Swatches */}
                 <div>
-                  <span className="text-xs font-semibold text-[#2d1b28] block mb-2">
-                    Background Style
-                  </span>
+                  <span className="text-xs font-semibold block mb-2">{t.collage.background}</span>
                   <div className="flex flex-wrap items-center gap-2">
                     {COLLAGE_BACKGROUNDS.map((bg) => (
                       <button
@@ -496,6 +525,20 @@ export function CollageMaker({ onNotify }: CollageMakerProps) {
           />
         </div>
       </div>
+
+      <LiveCameraCaptureModal
+        open={cameraModalOpen}
+        title={`${t.camera.captureFromCamera} · Slot #${cameraSlotIndex + 1}`}
+        onCapture={(dataUrl) => {
+          setPhotos((prev) => {
+            const next = [...prev];
+            next[cameraSlotIndex] = dataUrl;
+            return next;
+          });
+          onNotify(`Captured photo for collage slot #${cameraSlotIndex + 1}!`);
+        }}
+        onClose={() => setCameraModalOpen(false)}
+      />
     </section>
   );
 }

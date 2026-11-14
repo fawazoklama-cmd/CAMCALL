@@ -2,12 +2,16 @@ import {
   Camera,
   CameraOff,
   Check,
+  Dices,
   Download,
   Film,
   FlipHorizontal,
+  FolderHeart,
   Frame,
   LayoutGrid,
   Palette,
+  Pause,
+  Play,
   RefreshCw,
   RotateCcw,
   Shapes,
@@ -21,10 +25,14 @@ import {
   Type,
   Upload,
   Video,
+  Volume2,
+  VolumeX,
   Wand2,
   Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCameraEngine } from '../context/CameraEngineContext';
+import { useSettings } from '../context/SettingsContext';
 import {
   BOOTH_ASPECT_RATIOS,
   BOOTH_DECORATION_PRESETS,
@@ -58,20 +66,28 @@ import type {
   FaceFilterId,
 } from '../types/photobooth';
 import type { ExportOptions, PhotoboothTemplateId } from '../types/studio';
-import { downloadCanvasAsImage, loadHtmlImage } from '../utils/canvasRenderer';
+import { downloadCanvasAsImage } from '../utils/canvasRenderer';
 import { detectFaceAnchors, initFaceTracker } from '../utils/faceTracker';
 import { prepareCleanTrackingCanvas, renderLiveCameraFrame } from '../utils/liveCameraPipeline';
+import { recordHistoryDb, savePhotoToDb } from '../utils/localDb';
 import { aspectRatioToNumber, pickRandomBoothConfig } from '../utils/photoboothLayout';
 import { renderUltimatePhotoboothToCanvas } from '../utils/photoboothRenderer';
+import { playCountdownBeep, playShutterSound } from '../utils/soundEffects';
 import { ExportControls } from './ExportControls';
 
 interface PhotoboothStudioProps {
   initialTemplateId?: PhotoboothTemplateId;
+  initialMode?: CameraModeId;
+  initialTab?: LeftToolTab;
+  initialFaceCategory?: FaceFilterCategory;
+  initialBoothThemeId?: string;
+  initialLayoutId?: BoothLayoutId;
+  initialShapeId?: BoothShapeId;
   onEditFrame: (imageSrc: string) => void;
   onNotify: (msg: string, kind?: 'success' | 'info') => void;
 }
 
-type LeftToolTab =
+export type LeftToolTab =
   | 'modes'
   | 'themes'
   | 'layouts'
@@ -80,6 +96,20 @@ type LeftToolTab =
   | 'face-ar'
   | 'overlays'
   | 'decorate';
+
+const DAILY_CHALLENGES = [
+  'Pink Coquette Smile + Heart Glasses ♡',
+  'Seoul 4-Cut Besties Peace Sign ✌️',
+  'Y2K Lavender Dreamy Wink ✦',
+  'Retro 1998 Film Mirror Selfie 🎞️',
+];
+
+const POSE_GUIDES = [
+  { title: '1. Finger Heart', tip: 'Cross thumb & index gently near cheek' },
+  { title: '2. Soft Cheek Rest', tip: 'Tilt chin slightly & rest hand lightly' },
+  { title: '3. Twin Peace', tip: 'Framing face with upbeat V-signs' },
+  { title: '4. Candid Laugh', tip: 'Look slightly away & laugh naturally' },
+];
 
 function mapInitialTemplateToThemeId(tplId: PhotoboothTemplateId): string {
   switch (tplId) {
@@ -106,38 +136,73 @@ function mapInitialTemplateToThemeId(tplId: PhotoboothTemplateId): string {
 
 export function PhotoboothStudio({
   initialTemplateId = 'classic-korean',
+  initialMode,
+  initialTab,
+  initialFaceCategory,
+  initialBoothThemeId,
+  initialLayoutId,
+  initialShapeId,
   onEditFrame,
   onNotify,
 }: PhotoboothStudioProps) {
-  // Left Panel Tab & Category Filters
-  const [activeToolTab, setActiveToolTab] = useState<LeftToolTab>('themes');
-  const [themeCategory, setThemeCategory] = useState<BoothThemeCategory>('Korean Studio');
-  const [faceCategory, setFaceCategory] = useState<FaceFilterCategory>('Animal');
+  const { settings, updateSettings, t } = useSettings();
+  const engine = useCameraEngine();
+  const {
+    cameraState,
+    setCameraState,
+    errorKind,
+    facingMode,
+    setFacingMode,
+    devices,
+    selectedDeviceId,
+    setSelectedDeviceId,
+    resolution,
+    setResolution,
+    demoModelIndex,
+    setDemoModelIndex,
+    attachVideoElement,
+    startCamera,
+    stopStream,
+    applyHardwareZoom,
+    getDemoImage,
+  } = engine;
 
-  // Camera Hardware & Stream State
-  const [cameraState, setCameraState] = useState<'idle' | 'requesting' | 'active' | 'demo-live' | 'error'>('idle');
-  const [cameraError, setCameraError] = useState<string>('');
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [resolution, setResolution] = useState<CameraResolutionId>('720p');
-  const [mirrorPreview, setMirrorPreview] = useState<boolean>(true);
-  const [flashEnabled, setFlashEnabled] = useState<boolean>(true);
-  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
-  const [aspectRatio, setAspectRatio] = useState<BoothAspectRatio>('3:4');
-  const [countdownSeconds, setCountdownSeconds] = useState<0 | 3 | 5 | 10>(3);
+  // Left Panel Tab & Category Filters
+  const [activeToolTab, setActiveToolTab] = useState<LeftToolTab>(initialTab || 'themes');
+  const [themeCategory, setThemeCategory] = useState<BoothThemeCategory>('Korean Studio');
+  const [faceCategory, setFaceCategory] = useState<FaceFilterCategory>(initialFaceCategory || 'Animal');
+
+  // Camera Settings
+  const [mirrorPreview, setMirrorPreview] = useState<boolean>(settings.mirrorPreview);
+  const [flashEnabled, setFlashEnabled] = useState<boolean>(settings.flashEnabled);
+  const [zoomLevel, setZoomLevel] = useState<number>(settings.defaultZoom);
+  const [aspectRatio, setAspectRatio] = useState<BoothAspectRatio>(settings.aspectRatio);
+  const [countdownSeconds, setCountdownSeconds] = useState<0 | 3 | 5 | 10>(settings.countdownSeconds);
 
   // Camera Mode & Creative Booth Selections
-  const [cameraMode, setCameraMode] = useState<CameraModeId>('photobooth');
-  const [selectedThemeId, setSelectedThemeId] = useState<string>(() =>
-    mapInitialTemplateToThemeId(initialTemplateId)
+  const [cameraMode, setCameraMode] = useState<CameraModeId>(initialMode || settings.defaultCameraMode);
+  const [selectedThemeId, setSelectedThemeId] = useState<string>(
+    () => initialBoothThemeId || mapInitialTemplateToThemeId(initialTemplateId)
   );
-  const [selectedLayoutId, setSelectedLayoutId] = useState<BoothLayoutId>('strip-4');
-  const [selectedShapeId, setSelectedShapeId] = useState<BoothShapeId>('rounded');
+  const [selectedLayoutId, setSelectedLayoutId] = useState<BoothLayoutId>(initialLayoutId || 'strip-4');
+  const [selectedShapeId, setSelectedShapeId] = useState<BoothShapeId>(initialShapeId || 'rounded');
   const [selectedFilterId, setSelectedFilterId] = useState<string>('seoul-milk');
+  const [filterIntensity, setFilterIntensity] = useState<number>(100);
+  const [faceIntensity, setFaceIntensity] = useState<number>(100);
   const [activeEffects, setActiveEffects] = useState<CameraEffectId[]>(['soft-glow']);
   const [activeFaceFilters, setActiveFaceFilters] = useState<FaceFilterId[]>([]);
   const [activeOverlays, setActiveOverlays] = useState<CameraOverlayId[]>([]);
+
+  // Burst & Gesture Controls
+  const [burstCount, setBurstCount] = useState<number>(4);
+  const [burstIntervalMs, setBurstIntervalMs] = useState<number>(700);
+  const [burstShots, setBurstShots] = useState<string[]>([]);
+  const [smileLevel, setSmileLevel] = useState<number>(0);
+
+  // Interactive Fun Drawer
+  const [showFunDrawer, setShowFunDrawer] = useState<boolean>(false);
+  const [spinningFilter, setSpinningFilter] = useState<boolean>(false);
+  const [challengeIndex, setChallengeIndex] = useState<number>(0);
 
   // Capture & Strip Outputs
   const [frames, setFrames] = useState<(string | null)[]>([null, null, null, null]);
@@ -146,8 +211,9 @@ export function PhotoboothStudio({
   const [flashActive, setFlashActive] = useState<boolean>(false);
   const [isShootingSequence, setIsShootingSequence] = useState<boolean>(false);
 
-  // Video Recording State
+  // Video Recording State (supports Pause & Resume)
   const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [recordingSec, setRecordingSec] = useState<number>(0);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
 
@@ -165,23 +231,19 @@ export function PhotoboothStudio({
   // Export Quality
   const [qualityPreset, setQualityPreset] = useState<BoothQualityPreset>('high');
   const [exportOptions, setExportOptions] = useState<ExportOptions>({
-    format: 'png',
+    format: settings.saveFormat,
     quality: 96,
   });
 
-  // Demo Portrait index when using Live Studio Model preview without physical camera
-  const [demoModelIndex, setDemoModelIndex] = useState<number>(0);
-
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prevFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const stripCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const demoImageRef = useRef<HTMLImageElement | null>(null);
   const anchorsRef = useRef<FaceAnchorSet[]>([]);
   const lastDetectTsRef = useRef<number>(0);
+  const lastGestureSnapRef = useRef<number>(0);
   const burstAbortRef = useRef<boolean>(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -195,7 +257,7 @@ export function PhotoboothStudio({
   );
 
   const activeTheme = useMemo(
-    () => BOOTH_THEMES.find((t) => t.id === selectedThemeId) || BOOTH_THEMES[0],
+    () => BOOTH_THEMES.find((tItem) => tItem.id === selectedThemeId) || BOOTH_THEMES[0],
     [selectedThemeId]
   );
 
@@ -204,15 +266,32 @@ export function PhotoboothStudio({
     [selectedFilterId]
   );
 
-  // Sync theme if initialTemplateId prop changes
+  // Sync external navigation props
   useEffect(() => {
-    const mappedId = mapInitialTemplateToThemeId(initialTemplateId);
-    setSelectedThemeId(mappedId);
-    const theme = BOOTH_THEMES.find((t) => t.id === mappedId);
-    if (theme) {
-      setThemeCategory(theme.category);
+    if (initialMode) setCameraMode(initialMode);
+    if (initialTab) setActiveToolTab(initialTab);
+    if (initialFaceCategory) setFaceCategory(initialFaceCategory);
+  }, [initialMode, initialTab, initialFaceCategory]);
+
+  useEffect(() => {
+    if (initialBoothThemeId) {
+      setSelectedThemeId(initialBoothThemeId);
+      const theme = BOOTH_THEMES.find((tItem) => tItem.id === initialBoothThemeId);
+      if (theme) setThemeCategory(theme.category);
+    } else {
+      const mappedId = mapInitialTemplateToThemeId(initialTemplateId);
+      setSelectedThemeId(mappedId);
+      const theme = BOOTH_THEMES.find((tItem) => tItem.id === mappedId);
+      if (theme) setThemeCategory(theme.category);
     }
-  }, [initialTemplateId]);
+    if (initialLayoutId) setSelectedLayoutId(initialLayoutId);
+    if (initialShapeId) setSelectedShapeId(initialShapeId);
+  }, [initialTemplateId, initialBoothThemeId, initialLayoutId, initialShapeId]);
+
+  // Attach shared video ref
+  useEffect(() => {
+    attachVideoElement(videoRef.current);
+  }, [attachVideoElement]);
 
   // Adjust frame slots array whenever layout changes
   useEffect(() => {
@@ -220,44 +299,28 @@ export function PhotoboothStudio({
     setRetakeIndex(null);
   }, [activeLayout.slotCount]);
 
-  // Preload demo portrait image for Live AR Model preview
+  // Initialize MediaPipe Face Landmarker lazily when Face AR, Gesture, or live stage turns on
   useEffect(() => {
-    const sample = STUDIO_SAMPLE_PHOTOS[demoModelIndex % STUDIO_SAMPLE_PHOTOS.length];
-    loadHtmlImage(sample.src)
-      .then((img) => {
-        demoImageRef.current = img;
-      })
-      .catch(() => {});
-  }, [demoModelIndex]);
-
-  // Initialize MediaPipe Face Landmarker lazily when Face AR or live stage turns on
-  useEffect(() => {
-    if (activeFaceFilters.length > 0 || cameraState === 'active' || cameraState === 'demo-live') {
+    if (
+      activeFaceFilters.length > 0 ||
+      cameraMode === 'gesture' ||
+      cameraState === 'active' ||
+      cameraState === 'demo-live'
+    ) {
       initFaceTracker().catch(() => {});
     }
-  }, [activeFaceFilters.length, cameraState]);
-
-  // Clean up camera stream & video URLs on unmount
-  const stopStream = useCallback(() => {
-    burstAbortRef.current = true;
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        // Ignore stop error
-      }
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  }, []);
+  }, [activeFaceFilters.length, cameraMode, cameraState]);
 
   useEffect(() => {
     return () => {
+      burstAbortRef.current = true;
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // Ignore stop error
+        }
+      }
       stopStream();
     };
   }, [stopStream]);
@@ -270,83 +333,21 @@ export function PhotoboothStudio({
     };
   }, [recordedVideoUrl]);
 
-  // Apply hardware zoom if supported by active video track
+  // Apply hardware zoom if supported
   useEffect(() => {
-    const stream = streamRef.current;
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    if (!track || typeof track.getCapabilities !== 'function') return;
-    try {
-      const caps = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number; max: number } };
-      if (caps.zoom) {
-        const clampedZoom = Math.min(caps.zoom.max, Math.max(caps.zoom.min, zoomLevel));
-        track.applyConstraints({ advanced: [{ zoom: clampedZoom } as MediaTrackConstraintSet] }).catch(() => {});
-      }
-    } catch {
-      // Digital zoom fallback still runs inside renderLiveCameraFrame
-    }
-  }, [zoomLevel]);
+    applyHardwareZoom(zoomLevel);
+  }, [zoomLevel, applyHardwareZoom]);
 
-  const startCamera = useCallback(
-    async (
-      nextFacing: 'user' | 'environment' = facingMode,
-      deviceId?: string,
-      resId: CameraResolutionId = resolution
-    ) => {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraState('error');
-        setCameraError(
-          'Browser does not expose camera access here. Use "Live Studio Model" or "Upload" to test all Face AR & effects!'
-        );
-        return;
-      }
-
-      stopStream();
-      setCameraState('requesting');
-      setCameraError('');
-
-      const resConfig = CAMERA_RESOLUTIONS.find((r) => r.id === resId) || CAMERA_RESOLUTIONS[1];
-
-      try {
-        const videoConstraints: MediaTrackConstraints = deviceId
-          ? {
-              deviceId: { exact: deviceId },
-              width: { ideal: resConfig.width },
-              height: { ideal: resConfig.height },
-            }
-          : {
-              facingMode: { ideal: nextFacing },
-              width: { ideal: resConfig.width },
-              height: { ideal: resConfig.height },
-            };
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: videoConstraints,
-          audio: false,
-        });
-
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-        setCameraState('active');
-
-        if (navigator.mediaDevices.enumerateDevices) {
-          const allDevices = await navigator.mediaDevices.enumerateDevices();
-          setDevices(allDevices.filter((d) => d.kind === 'videoinput'));
-        }
-      } catch (err) {
-        setCameraState('error');
-        const msg =
-          err instanceof Error && err.name === 'NotAllowedError'
-            ? 'Camera permission declined. Allow access or switch to Live Studio Model / Upload below.'
-            : 'No physical webcam found. Try "Live Studio Model" for real-time Face AR & effects!';
-        setCameraError(msg);
-      }
-    },
-    [facingMode, resolution, stopStream]
-  );
+  const cameraError =
+    errorKind === 'permission'
+      ? t.camera.permissionRequiredDesc
+      : errorKind === 'in-use'
+        ? t.camera.cameraInUseDesc
+        : errorKind === 'unsupported'
+          ? t.camera.browserUnsupportedDesc
+          : errorKind === 'not-found'
+            ? t.camera.cameraNotFoundDesc
+            : '';
 
   // Real-time 30fps+ Live Camera & Face Tracking Render Loop
   useEffect(() => {
@@ -359,7 +360,7 @@ export function PhotoboothStudio({
 
     const tick = (nowMs: number) => {
       const canvas = liveCanvasRef.current;
-      const source = cameraState === 'active' ? videoRef.current : demoImageRef.current;
+      const source = cameraState === 'active' ? videoRef.current : getDemoImage();
 
       const sourceReady =
         source instanceof HTMLVideoElement
@@ -378,8 +379,7 @@ export function PhotoboothStudio({
             ? mirrorPreview && (facingMode === 'user' || cameraMode === 'mirror')
             : mirrorPreview && cameraMode === 'mirror';
 
-        // Throttle MediaPipe detection to ~15fps on clean cropped/mirrored/zoomed frame
-        if (activeFaceFilters.length > 0 && nowMs - lastDetectTsRef.current > 65) {
+        if ((activeFaceFilters.length > 0 || cameraMode === 'gesture') && nowMs - lastDetectTsRef.current > 65) {
           lastDetectTsRef.current = nowMs;
           const trackCanvas = trackingCanvasRef.current;
           if (
@@ -391,6 +391,35 @@ export function PhotoboothStudio({
               timeSec,
               allowFallback: true,
             });
+            const score = anchorsRef.current[0]?.smileScore ?? 0;
+            setSmileLevel(Math.round(score * 100));
+
+            // Gesture Camera: auto-snap when smile/open mouth gesture exceeds threshold
+            if (
+              cameraMode === 'gesture' &&
+              cameraState === 'active' &&
+              score >= 0.72 &&
+              nowMs - lastGestureSnapRef.current > 3200 &&
+              countdown === null &&
+              !isShootingSequence
+            ) {
+              lastGestureSnapRef.current = nowMs;
+              const shot = canvas.toDataURL('image/png');
+              if (shot && canvas.width > 0) {
+                if (flashEnabled) {
+                  setFlashActive(true);
+                  setTimeout(() => setFlashActive(false), 200);
+                }
+                if (settings.cameraSoundEnabled) playShutterSound();
+                setFrames((prev) => {
+                  const next = [...prev];
+                  const idx = next.findIndex((i) => i === null);
+                  next[idx === -1 ? next.length - 1 : idx] = shot;
+                  return next;
+                });
+                onNotify('Gesture Camera auto-captured smile!');
+              }
+            }
           }
         }
 
@@ -399,6 +428,8 @@ export function PhotoboothStudio({
           mirror: shouldMirror,
           zoom: zoomLevel,
           filter: activeFilter,
+          filterIntensity,
+          faceIntensity,
           activeEffects,
           activeFaceFilters,
           activeOverlays,
@@ -421,9 +452,17 @@ export function PhotoboothStudio({
     cameraMode,
     zoomLevel,
     activeFilter,
+    filterIntensity,
+    faceIntensity,
     activeEffects,
     activeFaceFilters,
     activeOverlays,
+    getDemoImage,
+    countdown,
+    isShootingSequence,
+    flashEnabled,
+    settings.cameraSoundEnabled,
+    onNotify,
   ]);
 
   // Re-render final Photostrip / Layout Canvas whenever slots, theme, shape, layout, filter, or decorations change
@@ -457,9 +496,8 @@ export function PhotoboothStudio({
     qualityPreset,
   ]);
 
-  // Apply Theme (updates background/frame/font/shape/recommended filter & effects)
   const handleSelectTheme = (themeId: string) => {
-    const theme = BOOTH_THEMES.find((t) => t.id === themeId);
+    const theme = BOOTH_THEMES.find((tItem) => tItem.id === themeId);
     if (!theme) return;
     setSelectedThemeId(theme.id);
     setSelectedShapeId(theme.defaultShapeId);
@@ -488,9 +526,11 @@ export function PhotoboothStudio({
     } else if (mode === 'timer') {
       setCountdownSeconds((prev) => (prev === 0 ? 3 : prev));
       onNotify('Timer Mode active — choose 3s, 5s, or 10s!');
+    } else if (mode === 'gesture') {
+      onNotify(t.camera.gestureHint, 'info');
     } else if (mode === 'random') {
       const cfg = pickRandomBoothConfig();
-      const theme = BOOTH_THEMES.find((t) => t.id === cfg.themeId);
+      const theme = BOOTH_THEMES.find((tItem) => tItem.id === cfg.themeId);
       setSelectedThemeId(cfg.themeId);
       if (theme) {
         setThemeCategory(theme.category);
@@ -506,6 +546,22 @@ export function PhotoboothStudio({
     }
   };
 
+  const handleSpinFilterWheel = () => {
+    if (spinningFilter) return;
+    setSpinningFilter(true);
+    let ticks = 0;
+    const id = setInterval(() => {
+      ticks += 1;
+      const randF = FILTER_PRESETS[Math.floor(Math.random() * FILTER_PRESETS.length)];
+      setSelectedFilterId(randF.id);
+      if (ticks >= 10) {
+        clearInterval(id);
+        setSpinningFilter(false);
+        onNotify(`Filter Wheel landed on "${randF.name}"!`);
+      }
+    }, 90);
+  };
+
   const triggerFlash = () => {
     if (!flashEnabled) return;
     setFlashActive(true);
@@ -515,8 +571,9 @@ export function PhotoboothStudio({
   const captureLiveCanvasFrame = useCallback((): string | null => {
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas || liveCanvas.width === 0) return null;
+    if (settings.cameraSoundEnabled) playShutterSound();
     return liveCanvas.toDataURL('image/png');
-  }, []);
+  }, [settings.cameraSoundEnabled]);
 
   const placeCapturedFrame = useCallback((dataUrl: string, targetIdx: number | null) => {
     setFrames((prev) => {
@@ -541,6 +598,7 @@ export function PhotoboothStudio({
     return new Promise((resolve) => {
       let curr = seconds;
       setCountdown(curr);
+      if (settings.cameraSoundEnabled) playCountdownBeep(false);
       const timer = setInterval(() => {
         if (burstAbortRef.current) {
           clearInterval(timer);
@@ -552,9 +610,11 @@ export function PhotoboothStudio({
         if (curr <= 0) {
           clearInterval(timer);
           setCountdown(null);
+          if (settings.cameraSoundEnabled) playCountdownBeep(true);
           resolve(true);
         } else {
           setCountdown(curr);
+          if (settings.cameraSoundEnabled) playCountdownBeep(false);
         }
       }, 1000);
     });
@@ -580,7 +640,8 @@ export function PhotoboothStudio({
       cameraMode === 'photo' ||
       cameraMode === 'mirror' ||
       cameraMode === 'timer' ||
-      cameraMode === 'random'
+      cameraMode === 'random' ||
+      cameraMode === 'gesture'
     ) {
       const wait = cameraMode === 'timer' ? Math.max(3, countdownSeconds) : countdownSeconds;
       const ok = await runCountdown(wait);
@@ -589,12 +650,43 @@ export function PhotoboothStudio({
       const shot = captureLiveCanvasFrame();
       if (shot) {
         placeCapturedFrame(shot, retakeIndex);
-        onNotify(retakeIndex !== null ? `Retook frame #${retakeIndex + 1}!` : 'Frame captured with live effects & AR!');
+        onNotify(
+          retakeIndex !== null
+            ? `Retook frame #${retakeIndex + 1}!`
+            : 'Frame captured with live effects & AR!'
+        );
       }
       return;
     }
 
-    // Burst Mode or Photobooth Mode -> fill remaining slots
+    // Burst Mode -> rapid capture N frames with burstIntervalMs + allow Pick Best Shot
+    if (cameraMode === 'burst') {
+      setIsShootingSequence(true);
+      const captured: string[] = [];
+      for (let i = 0; i < burstCount; i++) {
+        if (burstAbortRef.current) break;
+        if (i === 0 && countdownSeconds > 0) {
+          const ok = await runCountdown(Math.min(2, countdownSeconds));
+          if (!ok) break;
+        } else if (i > 0) {
+          await new Promise((r) => setTimeout(r, burstIntervalMs));
+        }
+        triggerFlash();
+        const shot = captureLiveCanvasFrame();
+        if (shot) {
+          captured.push(shot);
+          if (i < activeLayout.slotCount) {
+            placeCapturedFrame(shot, i);
+          }
+        }
+      }
+      setBurstShots(captured);
+      setIsShootingSequence(false);
+      onNotify(`Captured ${captured.length} burst shots — pick your best shot below!`);
+      return;
+    }
+
+    // Photobooth Mode -> fill remaining slots
     setIsShootingSequence(true);
     const total = activeLayout.slotCount;
     const firstEmpty = frames.findIndex((f) => f === null);
@@ -603,13 +695,7 @@ export function PhotoboothStudio({
     for (let i = startIdx; i < total; i++) {
       if (burstAbortRef.current) break;
       const waitSec =
-        cameraMode === 'burst'
-          ? i === startIdx
-            ? Math.min(2, countdownSeconds)
-            : 1
-          : i === startIdx
-            ? Math.max(1, countdownSeconds)
-            : Math.min(3, Math.max(1, countdownSeconds));
+        i === startIdx ? Math.max(1, countdownSeconds) : Math.min(3, Math.max(1, countdownSeconds));
       const ok = await runCountdown(waitSec);
       if (!ok || burstAbortRef.current) break;
       triggerFlash();
@@ -622,11 +708,12 @@ export function PhotoboothStudio({
     onNotify(`Captured ${total}-shot photobooth sequence!`);
   };
 
-  // Video Recording using MediaRecorder on the real-time live Canvas
+  // Video Recording using MediaRecorder on the real-time live Canvas (supports Pause/Resume)
   const handleToggleVideoRecording = () => {
     if (isRecording) {
       recorderRef.current?.stop();
       setIsRecording(false);
+      setIsPaused(false);
       return;
     }
 
@@ -658,19 +745,32 @@ export function PhotoboothStudio({
       recorderRef.current = recorder;
       recorder.start(200);
       setIsRecording(true);
+      setIsPaused(false);
       setRecordingSec(0);
     } catch {
       onNotify('Could not start video recording on this device.', 'info');
     }
   };
 
+  const handlePauseResumeVideo = () => {
+    const rec = recorderRef.current;
+    if (!rec || !isRecording) return;
+    if (isPaused) {
+      if (typeof rec.resume === 'function') rec.resume();
+      setIsPaused(false);
+    } else {
+      if (typeof rec.pause === 'function') rec.pause();
+      setIsPaused(true);
+    }
+  };
+
   useEffect(() => {
-    if (!isRecording) return;
+    if (!isRecording || isPaused) return;
     const timer = setInterval(() => {
       setRecordingSec((s) => s + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, [isRecording]);
+  }, [isRecording, isPaused]);
 
   const handleDemoFillAll = () => {
     triggerFlash();
@@ -771,7 +871,22 @@ export function PhotoboothStudio({
     const canvas = stripCanvasRef.current;
     if (!canvas) return;
     downloadCanvasAsImage(canvas, `camcall-${activeTheme.id}-${selectedLayoutId}`, exportOptions);
-    onNotify(`Saved ${exportOptions.format.toUpperCase()} (${qualityPreset} quality, no watermark)!`);
+    recordHistoryDb('template', activeTheme.id, activeTheme.name).catch(() => {});
+    onNotify(t.notifications.downloaded);
+  };
+
+  const handleSaveStripToGallery = async () => {
+    const canvas = stripCanvasRef.current;
+    if (!canvas) return;
+    await savePhotoToDb({
+      title: `Photobooth · ${activeTheme.name}`,
+      dataUrl: canvas.toDataURL('image/png'),
+      source: 'photobooth',
+      format: 'png',
+      favorite: false,
+    });
+    await recordHistoryDb('template', activeTheme.id, activeTheme.name);
+    onNotify(t.notifications.savedGallery);
   };
 
   const handleDownloadVideo = () => {
@@ -782,7 +897,7 @@ export function PhotoboothStudio({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    onNotify('Video exported free without watermark!');
+    onNotify(t.notifications.downloaded);
   };
 
   const capturedCount = frames.filter(Boolean).length;
@@ -821,20 +936,53 @@ export function PhotoboothStudio({
       <video ref={videoRef} playsInline muted autoPlay className="hidden" />
 
       {/* TOP: Studio Control Strip */}
-      <div className="rounded-2xl bg-white border border-[#f3d5e5] px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+      <div className="rounded-2xl camcall-surface border px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
         <div>
           <p className="text-[11px] font-semibold text-[#db2777] uppercase tracking-wider">
-            All-in-One Online Photobooth Studio
+            {t.camera.studioKicker}
           </p>
-          <h1 className="font-display text-xl sm:text-2xl font-bold text-[#2d1b28]">
-            CAMCALL Live AR &amp; Photobooth
-          </h1>
+          <h1 className="font-display text-xl sm:text-2xl font-bold">{t.camera.studioTitle}</h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono tabular-nums text-xs font-semibold text-[#6e4f62] px-3 py-1.5 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5]">
-            {capturedCount}/{activeLayout.slotCount} Shots · {activeTheme.name}
+          {/* Quick 2 / 3 / 4 / 6 / 8 Photobooth Frame Selector */}
+          <div className="inline-flex items-center gap-1 p-1 rounded-xl camcall-surface-soft border">
+            {(
+              [
+                { count: 2, id: 'double' as BoothLayoutId },
+                { count: 3, id: 'triple' as BoothLayoutId },
+                { count: 4, id: 'strip-4' as BoothLayoutId },
+                { count: 6, id: 'strip-6' as BoothLayoutId },
+                { count: 8, id: 'strip-8' as BoothLayoutId },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setSelectedLayoutId(opt.id)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
+                  selectedLayoutId === opt.id
+                    ? 'bg-[#db2777] text-white'
+                    : 'opacity-75 hover:opacity-100'
+                }`}
+              >
+                {opt.count}-Cut
+              </button>
+            ))}
+          </div>
+
+          <span className="font-mono tabular-nums text-xs font-semibold px-3 py-1.5 rounded-xl camcall-surface-soft border">
+            {capturedCount}/{activeLayout.slotCount} · {activeTheme.name}
           </span>
+
+          <button
+            type="button"
+            onClick={() => setShowFunDrawer((v) => !v)}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-[#fce7f3] text-[#be185d] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <Dices className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>{t.camera.interactiveTools}</span>
+          </button>
 
           <button
             type="button"
@@ -842,7 +990,7 @@ export function PhotoboothStudio({
             className="min-h-[38px] px-3 py-1.5 rounded-xl bg-[#ede9fe] hover:bg-[#ddd6fe] text-[#6d28d9] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
           >
             <Shuffle className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Randomize Vibe</span>
+            <span>{t.camera.randomizeVibe}</span>
           </button>
 
           {capturedCount > 0 && (
@@ -852,19 +1000,112 @@ export function PhotoboothStudio({
                 setFrames(Array.from({ length: activeLayout.slotCount }, () => null));
                 setRetakeIndex(null);
               }}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-[#f3d5e5] hover:border-rose-300 text-xs font-semibold text-[#6e4f62] hover:text-rose-600 inline-flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl camcall-surface-soft border hover:border-rose-300 text-xs font-semibold hover:text-rose-600 inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Clear Shots</span>
+              <span>{t.camera.clearShots}</span>
             </button>
           )}
         </div>
       </div>
 
+      {/* Interactive Features Drawer */}
+      {showFunDrawer && (
+        <div className="rounded-3xl camcall-surface border p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-2xl camcall-surface-soft border p-3.5 flex flex-col gap-2">
+            <p className="text-xs font-bold text-[#db2777]">🎡 {t.camera.spinFilter} &amp; {t.camera.photoRoulette}</p>
+            <p className="text-xs opacity-75">
+              {DAILY_CHALLENGES[challengeIndex % DAILY_CHALLENGES.length]}
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <button
+                type="button"
+                disabled={spinningFilter}
+                onClick={handleSpinFilterWheel}
+                className="px-3 py-1.5 rounded-xl bg-[#db2777] text-white text-xs font-semibold cursor-pointer"
+              >
+                {spinningFilter ? 'Spinning...' : t.camera.spinFilter}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const cfg = pickRandomBoothConfig();
+                  handleSelectTheme(cfg.themeId);
+                }}
+                className="px-3 py-1.5 rounded-xl camcall-surface border text-xs font-semibold cursor-pointer"
+              >
+                {t.camera.mysteryTheme}
+              </button>
+              <button
+                type="button"
+                onClick={() => setChallengeIndex((i) => i + 1)}
+                className="px-3 py-1.5 rounded-xl camcall-surface border text-xs font-semibold cursor-pointer"
+              >
+                Next Challenge
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl camcall-surface-soft border p-3.5 flex flex-col gap-2">
+            <p className="text-xs font-bold text-[#7c3aed]">✨ {t.camera.poseGuide}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {POSE_GUIDES.map((p) => (
+                <div key={p.title} className="rounded-xl camcall-surface border p-2 text-[11px]">
+                  <p className="font-bold">{p.title}</p>
+                  <p className="opacity-70 leading-tight mt-0.5">{p.tip}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl camcall-surface-soft border p-3.5 flex flex-col gap-2">
+            <p className="text-xs font-bold text-[#db2777]">👯 {t.camera.duoBooth} &amp; {t.camera.timerChallenge}</p>
+            <p className="text-xs opacity-75">
+              Quick presets for duo 2x2 photo sessions, Photo Roulette, or fast 3s Timer Challenge.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedLayoutId('grid-2x2');
+                  setSelectedShapeId('heart');
+                  setCameraMode('photobooth');
+                  onNotify('Duo Photobooth 2x2 Heart preset ready!');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#7c3aed] text-white text-xs font-semibold cursor-pointer"
+              >
+                {t.camera.duoBooth}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleModeSelect('random');
+                  setCameraMode('photobooth');
+                }}
+                className="px-3 py-1.5 rounded-xl camcall-surface border text-xs font-semibold cursor-pointer"
+              >
+                {t.camera.photoRoulette}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCountdownSeconds(3);
+                  setCameraMode('timer');
+                  onNotify('3s Timer Challenge activated!');
+                }}
+                className="px-3 py-1.5 rounded-xl camcall-surface border text-xs font-semibold cursor-pointer"
+              >
+                {t.camera.timerChallenge}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MAIN 3-COLUMN STUDIO WORKSPACE */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         {/* LEFT PANEL: Modes, Themes, Layouts, Shapes, Effects, Face AR, Overlays, Decorate */}
-        <aside className="lg:col-span-3 order-2 lg:order-1 rounded-3xl bg-white border border-[#f3d5e5] p-3.5 flex flex-col gap-3">
+        <aside className="lg:col-span-3 order-2 lg:order-1 rounded-3xl camcall-surface border p-3.5 flex flex-col gap-3">
           <div className="grid grid-cols-4 lg:grid-cols-2 gap-1.5">
             {LEFT_TABS.map(({ id, label, Icon }) => {
               const active = activeToolTab === id;
@@ -876,7 +1117,7 @@ export function PhotoboothStudio({
                   className={`min-h-[40px] px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 justify-center lg:justify-start cursor-pointer transition-colors ${
                     active
                       ? 'bg-[#db2777] text-white shadow-xs'
-                      : 'bg-[#fdf2f8] text-[#6e4f62] hover:text-[#2d1b28]'
+                      : 'camcall-surface-soft opacity-80 hover:opacity-100'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -886,11 +1127,13 @@ export function PhotoboothStudio({
             })}
           </div>
 
-          <div className="pt-2 border-t border-[#f3d5e5] max-h-[540px] overflow-y-auto studio-scroll pr-1">
+          <div className="pt-2 border-t border-current/10 max-h-[540px] overflow-y-auto studio-scroll pr-1">
             {/* TAB: CAMERA MODES */}
             {activeToolTab === 'modes' && (
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-semibold text-[#6e4f62]">Camera Modes (7)</p>
+                <p className="text-xs font-semibold opacity-75">
+                  Camera Modes ({CAMERA_MODE_PRESETS.length})
+                </p>
                 {CAMERA_MODE_PRESETS.map((m) => {
                   const active = cameraMode === m.id;
                   return (
@@ -900,18 +1143,48 @@ export function PhotoboothStudio({
                       onClick={() => handleModeSelect(m.id)}
                       className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                         active
-                          ? 'border-[#db2777] bg-[#fdf2f8]'
-                          : 'border-[#f3d5e5] bg-white hover:border-[#f472b6]'
+                          ? 'border-[#db2777] bg-[#fdf2f8] text-[#2d1b28]'
+                          : 'camcall-surface-soft hover:border-[#f472b6]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#2d1b28]">{m.name}</span>
+                        <span className="text-xs font-bold">{m.name}</span>
                         {active && <Check className="w-3.5 h-3.5 text-[#db2777]" />}
                       </div>
-                      <p className="text-[11px] text-[#6e4f62] mt-0.5">{m.description}</p>
+                      <p className="text-[11px] opacity-75 mt-0.5">{m.description}</p>
                     </button>
                   );
                 })}
+
+                {cameraMode === 'burst' && (
+                  <div className="p-3 rounded-2xl camcall-surface-soft border flex flex-col gap-2 mt-1">
+                    <div className="flex justify-between text-xs font-semibold">
+                      <span>{t.camera.burstCount}</span>
+                      <span className="font-mono">{burstCount}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={2}
+                      max={6}
+                      value={burstCount}
+                      onChange={(e) => setBurstCount(Number(e.target.value))}
+                      className="studio-slider w-full"
+                    />
+                    <div className="flex justify-between text-xs font-semibold">
+                      <span>{t.camera.burstInterval}</span>
+                      <span className="font-mono">{burstIntervalMs}ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={400}
+                      max={1500}
+                      step={100}
+                      value={burstIntervalMs}
+                      onChange={(e) => setBurstIntervalMs(Number(e.target.value))}
+                      className="studio-slider w-full"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -1093,7 +1366,7 @@ export function PhotoboothStudio({
               </div>
             )}
 
-            {/* TAB: REAL-TIME FACE FILTERS (25 MediaPipe AR Filters) */}
+            {/* TAB: REAL-TIME FACE FILTERS (MediaPipe AR Filters) */}
             {activeToolTab === 'face-ar' && (
               <div className="flex flex-col gap-2.5">
                 <div className="flex flex-wrap gap-1.5">
@@ -1105,13 +1378,28 @@ export function PhotoboothStudio({
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
                         faceCategory === cat
                           ? 'bg-[#db2777] text-white'
-                          : 'bg-[#fdf2f8] text-[#6e4f62]'
+                          : 'camcall-surface-soft border'
                       }`}
                     >
                       {cat}
                     </button>
                   ))}
                 </div>
+
+                <label className="flex flex-col gap-1 text-[11px] font-semibold">
+                  <div className="flex justify-between">
+                    <span>{t.camera.faceIntensity}</span>
+                    <span className="font-mono text-[#7c3aed]">{faceIntensity}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={20}
+                    max={100}
+                    value={faceIntensity}
+                    onChange={(e) => setFaceIntensity(Number(e.target.value))}
+                    className="studio-slider w-full"
+                  />
+                </label>
 
                 {activeFaceFilters.length > 0 && (
                   <button
@@ -1133,17 +1421,15 @@ export function PhotoboothStudio({
                         onClick={() => toggleFaceFilter(filter.id)}
                         className={`p-2 rounded-xl border text-left flex items-center gap-2 cursor-pointer transition-all ${
                           active
-                            ? 'border-[#7c3aed] bg-[#ede9fe]/60'
-                            : 'border-[#f3d5e5] bg-white hover:border-[#a78bfa]'
+                            ? 'border-[#7c3aed] bg-[#ede9fe]/60 text-[#2d1b28]'
+                            : 'camcall-surface-soft hover:border-[#a78bfa]'
                         }`}
                       >
                         <span
                           className="w-3 h-3 rounded-full shrink-0"
                           style={{ backgroundColor: filter.swatchColor }}
                         />
-                        <span className="text-[11px] font-semibold text-[#2d1b28] truncate">
-                          {filter.name}
-                        </span>
+                        <span className="text-[11px] font-semibold truncate">{filter.name}</span>
                       </button>
                     );
                   })}
@@ -1396,7 +1682,23 @@ export function PhotoboothStudio({
 
         {/* CENTER: Live Camera Preview + BOTTOM Camera Dock & Gallery */}
         <div className="lg:col-span-5 order-1 lg:order-2 flex flex-col gap-4">
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-3.5 sm:p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
+          <div className="rounded-3xl camcall-surface border p-3.5 sm:p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
+            {/* Gesture Mode Indicator */}
+            {cameraMode === 'gesture' && (
+              <div className="px-3 py-2 rounded-xl camcall-surface-soft border flex items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-[#db2777]">{t.camera.gestureActive}</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-20 h-2 rounded-full bg-black/10 overflow-hidden">
+                    <div
+                      className="h-full bg-[#db2777] transition-all"
+                      style={{ width: `${Math.min(100, smileLevel)}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-[11px]">{smileLevel}%</span>
+                </div>
+              </div>
+            )}
+
             {/* Live Camera Stage */}
             <div className="relative w-full min-h-[300px] max-h-[500px] rounded-2xl bg-[#2d1b28] flex items-center justify-center overflow-hidden p-2">
               {(cameraState === 'active' || cameraState === 'demo-live') && (
@@ -1418,8 +1720,12 @@ export function PhotoboothStudio({
               {/* Recording Indicator */}
               {isRecording && (
                 <div className="absolute top-4 left-4 px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-mono font-bold inline-flex items-center gap-2 shadow-md">
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                  <span>REC 00:{String(recordingSec).padStart(2, '0')}</span>
+                  <span
+                    className={`w-2 h-2 rounded-full bg-white ${isPaused ? '' : 'animate-pulse'}`}
+                  />
+                  <span>
+                    {isPaused ? 'PAUSED' : 'REC'} 00:{String(recordingSec).padStart(2, '0')}
+                  </span>
                 </div>
               )}
 
@@ -1444,8 +1750,7 @@ export function PhotoboothStudio({
                   <div>
                     <h2 className="font-display text-lg font-bold">Start CAMCALL Studio</h2>
                     <p className="text-xs text-pink-100/90 mt-1 leading-relaxed">
-                      Enable your camera for real-time Face AR &amp; effects, or try our Live Studio
-                      Model right away.
+                      {t.camera.permissionRequiredDesc}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1455,7 +1760,7 @@ export function PhotoboothStudio({
                       className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       <Camera className="w-4 h-4" />
-                      <span>Enable Camera</span>
+                      <span>{t.camera.enableCamera}</span>
                     </button>
                     <button
                       type="button"
@@ -1463,7 +1768,7 @@ export function PhotoboothStudio({
                       className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4" />
-                      <span>Live Studio Model</span>
+                      <span>{t.camera.liveModel}</span>
                     </button>
                   </div>
                 </div>
@@ -1473,7 +1778,7 @@ export function PhotoboothStudio({
               {cameraState === 'requesting' && (
                 <div className="p-6 text-center text-white flex flex-col items-center gap-3">
                   <RefreshCw className="w-7 h-7 animate-spin text-pink-300" />
-                  <p className="text-xs font-medium">Opening camera...</p>
+                  <p className="text-xs font-medium">{t.camera.openingCamera}</p>
                 </div>
               )}
 
@@ -1488,29 +1793,29 @@ export function PhotoboothStudio({
                       onClick={() => startCamera()}
                       className="min-h-[40px] px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold cursor-pointer"
                     >
-                      Retry Camera
+                      {t.camera.retryCamera}
                     </button>
                     <button
                       type="button"
                       onClick={() => setCameraState('demo-live')}
                       className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs font-semibold cursor-pointer"
                     >
-                      Use Live Studio Model
+                      {t.camera.liveModel}
                     </button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Demo Model Switcher when Live Studio Model is active */}
+            {/* Demo Model Switcher */}
             {cameraState === 'demo-live' && (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] text-xs">
-                <span className="font-medium text-[#6e4f62]">Live Studio AR Model:</span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl camcall-surface-soft border text-xs">
+                <span className="font-medium opacity-75">Live Studio AR Model:</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setDemoModelIndex((i) => (i + 1) % STUDIO_SAMPLE_PHOTOS.length)}
-                    className="px-2.5 py-1 rounded-lg bg-white border border-[#f3d5e5] text-[#2d1b28] font-semibold cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg camcall-surface border font-semibold cursor-pointer"
                   >
                     Switch Model
                   </button>
@@ -1525,37 +1830,64 @@ export function PhotoboothStudio({
               </div>
             )}
 
-            {/* BOTTOM BAR: Filter Carousel + Capture Button + Switch Camera */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 studio-scroll">
-              {[{ id: 'none', name: 'Original' }, ...FILTER_PRESETS].map((f) => {
-                const active = selectedFilterId === f.id;
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setSelectedFilterId(f.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                      active
-                        ? 'bg-[#db2777] text-white'
-                        : 'bg-[#fdf2f8] text-[#6e4f62] hover:text-[#2d1b28]'
-                    }`}
-                  >
-                    {f.name}
-                  </button>
-                );
-              })}
+            {/* BOTTOM BAR: Filter Carousel + Filter Intensity */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 studio-scroll">
+                {[{ id: 'none', name: 'Original' }, ...FILTER_PRESETS].map((f) => {
+                  const active = selectedFilterId === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setSelectedFilterId(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                        active
+                          ? 'bg-[#db2777] text-white'
+                          : 'camcall-surface-soft border opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      {f.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedFilterId !== 'none' && (
+                <div className="flex items-center gap-2 text-[11px] px-1">
+                  <span className="opacity-75">{t.filters.intensity}</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    value={filterIntensity}
+                    onChange={(e) => setFilterIntensity(Number(e.target.value))}
+                    className="studio-slider flex-1"
+                  />
+                  <span className="font-mono font-semibold text-[#db2777]">{filterIntensity}%</span>
+                </div>
+              )}
             </div>
 
-            {/* Capture & Camera Action Dock (Thumb-friendly on mobile) */}
+            {/* Capture & Camera Action Dock */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <button
                 type="button"
                 onClick={handleToggleFacing}
-                className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#fdf2f8] hover:bg-[#fce7f3] text-[#2d1b28] border border-[#f3d5e5] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                className="min-h-[44px] px-3.5 py-2 rounded-xl camcall-surface-soft border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <SwitchCamera className="w-4 h-4 text-[#db2777]" />
-                <span>{facingMode === 'user' ? 'Front' : 'Rear'}</span>
+                <span>{facingMode === 'user' ? t.camera.frontCam : t.camera.rearCam}</span>
               </button>
+
+              {isRecording && (
+                <button
+                  type="button"
+                  onClick={handlePauseResumeVideo}
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  <span>{isPaused ? t.camera.resumeRecording : t.camera.pauseRecording}</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1573,12 +1905,12 @@ export function PhotoboothStudio({
                   isRecording ? (
                     <>
                       <Square className="w-4 h-4" />
-                      <span>Stop Recording</span>
+                      <span>{t.camera.stopRecording}</span>
                     </>
                   ) : (
                     <>
                       <Video className="w-4 h-4" />
-                      <span>Record Video</span>
+                      <span>{t.camera.recordVideo}</span>
                     </>
                   )
                 ) : cameraMode === 'burst' || cameraMode === 'photobooth' ? (
@@ -1586,16 +1918,20 @@ export function PhotoboothStudio({
                     <Zap className="w-4 h-4" />
                     <span>
                       {retakeIndex !== null
-                        ? `Retake #${retakeIndex + 1}`
+                        ? `${t.camera.retakeFrame}${retakeIndex + 1}`
                         : cameraMode === 'burst'
-                          ? `Burst (${activeLayout.slotCount})`
+                          ? `Burst (${burstCount})`
                           : `Shoot Booth (${activeLayout.slotCount})`}
                     </span>
                   </>
                 ) : (
                   <>
                     <Camera className="w-4 h-4" />
-                    <span>{retakeIndex !== null ? `Retake #${retakeIndex + 1}` : 'Capture Photo'}</span>
+                    <span>
+                      {retakeIndex !== null
+                        ? `${t.camera.retakeFrame}${retakeIndex + 1}`
+                        : t.camera.capturePhoto}
+                    </span>
                   </>
                 )}
               </button>
@@ -1606,9 +1942,40 @@ export function PhotoboothStudio({
                 className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#ede9fe] hover:bg-[#ddd6fe] text-[#6d28d9] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>Demo Fill</span>
+                <span>{t.camera.demoFill}</span>
               </button>
             </div>
+
+            {/* Burst Candidate Best-Shot Picker */}
+            {burstShots.length > 0 && (
+              <div className="pt-2 border-t border-current/10 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-[#db2777]">Burst Captures — Click to set Slot #1</span>
+                  <button
+                    type="button"
+                    onClick={() => setBurstShots([])}
+                    className="text-[11px] opacity-70 cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {burstShots.map((bSrc, bIdx) => (
+                    <button
+                      key={bIdx}
+                      type="button"
+                      onClick={() => {
+                        placeCapturedFrame(bSrc, 0);
+                        onNotify(`Picked burst shot #${bIdx + 1} as best shot!`);
+                      }}
+                      className="w-16 h-16 rounded-xl overflow-hidden border-2 border-transparent hover:border-[#db2777] shrink-0 cursor-pointer"
+                    >
+                      <img src={bSrc} alt={`Burst ${bIdx + 1}`} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* BOTTOM GALLERY PREVIEW STRIP */}
@@ -1680,12 +2047,12 @@ export function PhotoboothStudio({
         {/* RIGHT PANEL: Camera Settings, Selected Effects, Live Result Canvas & Export */}
         <aside className="lg:col-span-4 order-3 flex flex-col gap-4">
           {/* Camera Settings Card */}
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col gap-3">
-            <h2 className="font-display text-sm font-bold text-[#2d1b28]">Camera Settings</h2>
+          <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
+            <h2 className="font-display text-sm font-bold">{t.camera.settingsTitle}</h2>
 
-            {/* Aspect Ratio (1:1, 3:4, 4:3, 9:16, 16:9) */}
+            {/* Aspect Ratio */}
             <div className="flex flex-col gap-1.5">
-              <span className="text-[11px] font-semibold text-[#6e4f62]">Aspect Ratio</span>
+              <span className="text-[11px] font-semibold opacity-75">{t.camera.aspectRatio}</span>
               <div className="grid grid-cols-5 gap-1">
                 {BOOTH_ASPECT_RATIOS.map((ratio) => (
                   <button
@@ -1695,7 +2062,7 @@ export function PhotoboothStudio({
                     className={`py-1.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
                       aspectRatio === ratio
                         ? 'bg-[#7c3aed] text-white'
-                        : 'bg-[#fdf2f8] text-[#6e4f62] hover:text-[#2d1b28]'
+                        : 'camcall-surface-soft border'
                     }`}
                   >
                     {ratio}
@@ -1707,7 +2074,7 @@ export function PhotoboothStudio({
             {/* Countdown Timer & Resolution */}
             <div className="grid grid-cols-2 gap-2.5">
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] font-semibold text-[#6e4f62]">Timer</span>
+                <span className="text-[11px] font-semibold opacity-75">{t.camera.timer}</span>
                 <div className="grid grid-cols-4 gap-1">
                   {([0, 3, 5, 10] as const).map((sec) => (
                     <button
@@ -1717,7 +2084,7 @@ export function PhotoboothStudio({
                       className={`py-1.5 rounded-lg text-[11px] font-mono font-semibold cursor-pointer ${
                         countdownSeconds === sec
                           ? 'bg-[#db2777] text-white'
-                          : 'bg-[#fdf2f8] text-[#6e4f62]'
+                          : 'camcall-surface-soft border'
                       }`}
                     >
                       {sec === 0 ? 'Off' : `${sec}s`}
@@ -1727,7 +2094,7 @@ export function PhotoboothStudio({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] font-semibold text-[#6e4f62]">Resolution</span>
+                <span className="text-[11px] font-semibold opacity-75">{t.camera.resolution}</span>
                 <select
                   aria-label="Camera resolution"
                   value={resolution}
@@ -1736,7 +2103,7 @@ export function PhotoboothStudio({
                     setResolution(nextRes);
                     if (cameraState === 'active') startCamera(facingMode, selectedDeviceId || undefined, nextRes);
                   }}
-                  className="px-2.5 py-1.5 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] text-xs text-[#2d1b28]"
+                  className="px-2.5 py-1.5 rounded-xl camcall-surface-soft border text-xs"
                 >
                   {CAMERA_RESOLUTIONS.map((r) => (
                     <option key={r.id} value={r.id}>
@@ -1747,32 +2114,45 @@ export function PhotoboothStudio({
               </div>
             </div>
 
-            {/* Mirror, Flash & Zoom */}
+            {/* Mirror, Flash & Sound */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setMirrorPreview((p) => !p)}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
-                  mirrorPreview
-                    ? 'bg-[#fce7f3] border-[#db2777] text-[#be185d]'
-                    : 'bg-white border-[#f3d5e5] text-[#6e4f62]'
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                  mirrorPreview ? 'bg-[#fce7f3] border-[#db2777] text-[#be185d]' : 'camcall-surface-soft'
                 }`}
               >
                 <FlipHorizontal className="w-3.5 h-3.5" />
-                <span>Mirror {mirrorPreview ? 'On' : 'Off'}</span>
+                <span>{mirrorPreview ? t.camera.mirrorOn : t.camera.mirrorOff}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setFlashEnabled((p) => !p)}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
-                  flashEnabled
-                    ? 'bg-[#fce7f3] border-[#db2777] text-[#be185d]'
-                    : 'bg-white border-[#f3d5e5] text-[#6e4f62]'
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                  flashEnabled ? 'bg-[#fce7f3] border-[#db2777] text-[#be185d]' : 'camcall-surface-soft'
                 }`}
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span>Flash {flashEnabled ? 'On' : 'Off'}</span>
+                <span>{flashEnabled ? t.camera.flashOn : t.camera.flashOff}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => updateSettings({ cameraSoundEnabled: !settings.cameraSoundEnabled })}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                  settings.cameraSoundEnabled
+                    ? 'bg-[#ede9fe] border-[#7c3aed] text-[#6d28d9]'
+                    : 'camcall-surface-soft'
+                }`}
+              >
+                {settings.cameraSoundEnabled ? (
+                  <Volume2 className="w-3.5 h-3.5" />
+                ) : (
+                  <VolumeX className="w-3.5 h-3.5" />
+                )}
+                <span>{settings.cameraSoundEnabled ? t.camera.soundOn : t.camera.soundOff}</span>
               </button>
 
               {devices.length > 1 && (
@@ -1783,7 +2163,7 @@ export function PhotoboothStudio({
                     setSelectedDeviceId(e.target.value);
                     startCamera(facingMode, e.target.value, resolution);
                   }}
-                  className="flex-1 min-w-[120px] px-2 py-1.5 rounded-xl bg-white border border-[#f3d5e5] text-xs text-[#2d1b28]"
+                  className="flex-1 min-w-[120px] px-2 py-1.5 rounded-xl camcall-surface-soft border text-xs"
                 >
                   <option value="">Default Cam</option>
                   {devices.map((d, i) => (
@@ -1795,8 +2175,10 @@ export function PhotoboothStudio({
               )}
             </div>
 
-            <label className="flex items-center justify-between gap-3 text-xs text-[#6e4f62]">
-              <span className="font-semibold">Zoom ({zoomLevel.toFixed(1)}×)</span>
+            <label className="flex items-center justify-between gap-3 text-xs opacity-80">
+              <span className="font-semibold">
+                {t.camera.zoom} ({zoomLevel.toFixed(1)}×)
+              </span>
               <input
                 type="range"
                 min={1}
@@ -1809,7 +2191,7 @@ export function PhotoboothStudio({
             </label>
 
             {/* Active Effects & AR Summary */}
-            <div className="pt-2 border-t border-[#f3d5e5] flex flex-wrap gap-1.5 text-[11px]">
+            <div className="pt-2 border-t border-current/10 flex flex-wrap gap-1.5 text-[11px]">
               <span className="px-2 py-0.5 rounded-md bg-[#fdf2f8] text-[#db2777] font-semibold">
                 {activeLayout.name}
               </span>
@@ -1840,16 +2222,14 @@ export function PhotoboothStudio({
           </div>
 
           {/* Live Rendered Photostrip / Collage Result + Free Export */}
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col gap-3">
+          <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-display text-sm font-bold text-[#2d1b28]">
-                Photostrip &amp; Collage Preview
-              </h2>
+              <h2 className="font-display text-sm font-bold">Photostrip &amp; Collage Preview</h2>
               <select
                 aria-label="Export resolution preset"
                 value={qualityPreset}
                 onChange={(e) => setQualityPreset(e.target.value as BoothQualityPreset)}
-                className="px-2 py-1 rounded-lg bg-[#fdf2f8] border border-[#f3d5e5] text-[11px] font-semibold text-[#2d1b28]"
+                className="px-2 py-1 rounded-lg camcall-surface-soft border text-[11px] font-semibold"
               >
                 <option value="standard">Standard</option>
                 <option value="high">High Quality</option>
@@ -1864,9 +2244,9 @@ export function PhotoboothStudio({
                 value={stripCaption}
                 onChange={(e) => setStripCaption(e.target.value)}
                 placeholder="Caption (e.g. Besties Seoul Day ♡)"
-                className="flex-1 px-3 py-1.5 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] text-xs text-[#2d1b28]"
+                className="flex-1 px-3 py-1.5 rounded-xl camcall-surface-soft border text-xs"
               />
-              <label className="inline-flex items-center gap-1.5 text-xs text-[#6e4f62] cursor-pointer shrink-0">
+              <label className="inline-flex items-center gap-1.5 text-xs opacity-80 cursor-pointer shrink-0">
                 <input
                   type="checkbox"
                   checked={showDate}
@@ -1877,7 +2257,7 @@ export function PhotoboothStudio({
               </label>
             </div>
 
-            <div className="w-full flex justify-center bg-[#fdf2f8] rounded-2xl p-3 border border-[#f3d5e5] max-h-[440px] overflow-auto studio-scroll">
+            <div className="w-full flex justify-center camcall-surface-soft rounded-2xl p-3 border max-h-[440px] overflow-auto studio-scroll">
               <canvas
                 ref={stripCanvasRef}
                 data-testid="photostrip-preview-canvas"
@@ -1888,6 +2268,15 @@ export function PhotoboothStudio({
                 className="max-w-full max-h-[400px] w-auto h-auto rounded-lg shadow-md touch-none cursor-grab active:cursor-grabbing"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={handleSaveStripToGallery}
+              className="w-full min-h-[40px] px-4 py-2 rounded-xl camcall-surface-soft border hover:border-[#db2777] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <FolderHeart className="w-4 h-4 text-[#db2777]" />
+              <span>{t.camera.saveToGallery}</span>
+            </button>
 
             <ExportControls
               options={exportOptions}

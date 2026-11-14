@@ -27,11 +27,11 @@ test('photobooth presets contain all requested shapes, layouts, themes, effects,
   assert.equal(BOOTH_LAYOUTS.length, 13);
   assert.equal(BOOTH_THEME_CATEGORIES.length, 6);
   assert.equal(BOOTH_THEMES.length, 36);
-  assert.equal(CAMERA_EFFECT_PRESETS.length, 18);
-  assert.equal(FACE_FILTER_CATEGORIES.length, 4);
-  assert.equal(FACE_FILTER_PRESETS.length, 25);
+  assert.equal(CAMERA_EFFECT_PRESETS.length, 21);
+  assert.equal(FACE_FILTER_CATEGORIES.length, 5);
+  assert.equal(FACE_FILTER_PRESETS.length, 31);
   assert.equal(CAMERA_OVERLAY_PRESETS.length, 9);
-  assert.equal(CAMERA_MODE_PRESETS.length, 7);
+  assert.equal(CAMERA_MODE_PRESETS.length, 8);
   assert.deepEqual(BOOTH_ASPECT_RATIOS, ['1:1', '3:4', '4:3', '9:16', '16:9']);
 });
 

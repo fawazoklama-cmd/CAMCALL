@@ -1,4 +1,15 @@
-export type StudioView = 'home' | 'photobooth' | 'filters' | 'editor' | 'collage' | 'creative' | 'about';
+export type StudioView =
+  | 'home'
+  | 'photobooth'
+  | 'filters'
+  | 'editor'
+  | 'collage'
+  | 'creative'
+  | 'creative-modes'
+  | 'templates'
+  | 'gallery'
+  | 'settings'
+  | 'about';
 
 export type FilterCategory =
   | 'All'
@@ -43,6 +54,8 @@ export interface EditorAdjustments {
   blur: number; // 0 to 20
   grain: number; // 0 to 100
   vignette: number; // 0 to 100
+  highlights?: number; // -100 to 100
+  shadows?: number; // -100 to 100
 }
 
 export interface CropRect {

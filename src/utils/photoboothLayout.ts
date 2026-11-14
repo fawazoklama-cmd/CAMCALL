@@ -139,6 +139,8 @@ export function landmarksToFaceAnchors(
 
   const upperLip = mapPt(landmarks[13]);
   const lowerLip = mapPt(landmarks[14]);
+  const leftMouthCorner = mapPt(landmarks[61]);
+  const rightMouthCorner = mapPt(landmarks[291]);
   const mouth = { x: (upperLip.x + lowerLip.x) / 2, y: (upperLip.y + lowerLip.y) / 2 };
 
   const dx = rightEye.x - leftEye.x;
@@ -147,6 +149,11 @@ export function landmarksToFaceAnchors(
   const headAngle = Math.atan2(dy, dx);
   const faceHeight = Math.max(0.15, Math.hypot(chin.x - forehead.x, chin.y - forehead.y));
   const mouthOpen = Math.min(1, Math.max(0, Math.abs(lowerLip.y - upperLip.y) / (faceHeight * 0.2)));
+  const mouthWidth = Math.hypot(
+    rightMouthCorner.x - leftMouthCorner.x,
+    rightMouthCorner.y - leftMouthCorner.y
+  );
+  const smileScore = Math.min(1, Math.max(0, (mouthWidth / eyeDistance - 0.68) / 0.35));
 
   return {
     forehead,
@@ -163,6 +170,7 @@ export function landmarksToFaceAnchors(
     faceHeight,
     headAngle,
     mouthOpen,
+    smileScore,
     isTracked: true,
   };
 }
@@ -190,6 +198,7 @@ export function createDefaultFaceAnchors(timeSec = 0): FaceAnchorSet {
     faceHeight: 0.34,
     headAngle: angle,
     mouthOpen: 0.15,
+    smileScore: 0.25,
     isTracked: false,
   };
 }

@@ -1,11 +1,13 @@
 import {
   ArrowDown,
   ArrowUp,
+  Camera,
   Check,
   ChevronsDown,
   ChevronsUp,
   Download,
   Eye,
+  FolderHeart,
   Frame,
   ImagePlus,
   Layers,
@@ -14,6 +16,7 @@ import {
   Palette,
   Redo2,
   RotateCcw,
+  Save,
   Shapes,
   Sparkles,
   Sticker,
@@ -25,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSettings } from '../context/SettingsContext';
 import {
   BACKGROUND_PRESETS,
   DECORATION_CATEGORIES,
@@ -50,6 +54,7 @@ import type {
   ShapeId,
   ThemeCategory,
 } from '../types/creative';
+import type { LocalProjectRecord } from '../types/settings';
 import { downloadCanvasAsImage, exportCanvasDataUrl } from '../utils/canvasRenderer';
 import {
   applyThemeToDesignState,
@@ -58,8 +63,11 @@ import {
 } from '../utils/creativeGeometry';
 import { renderCreativeDesignToCanvas, traceShapePath } from '../utils/creativeRenderer';
 import { createHistoryState, pushHistory, redoHistory, undoHistory } from '../utils/imageProcessing';
+import { recordHistoryDb, savePhotoToDb, saveProjectToDb } from '../utils/localDb';
+import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
 
 interface CreativeCollectionStudioProps {
+  initialProject?: LocalProjectRecord | null;
   onNotify: (msg: string, kind?: 'success' | 'info') => void;
 }
 
@@ -121,12 +129,19 @@ function ShapeMiniIcon({ shapeId, active }: { shapeId: ShapeId; active: boolean 
   return <canvas ref={miniRef} width={40} height={40} aria-hidden="true" className="w-8 h-8 shrink-0" />;
 }
 
-export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioProps) {
+export function CreativeCollectionStudio({
+  initialProject,
+  onNotify,
+}: CreativeCollectionStudioProps) {
+  const { t } = useSettings();
   const [activeTab, setActiveTab] = useState<CollectionTab>('shapes');
   const [themeCategory, setThemeCategory] = useState<ThemeCategory>('Pink Collection');
   const [bgCategory, setBgCategory] = useState<BackgroundCategory>('Solid');
   const [decCategory, setDecCategory] = useState<DecorationCategory>('Hearts');
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [cameraModalTarget, setCameraModalTarget] = useState<
+    { kind: 'slot'; index: number } | { kind: 'scrapbook' } | null
+  >(null);
 
   const [customText, setCustomText] = useState('Cute Memories ♡');
   const [customFont, setCustomFont] = useState(TEXT_FONTS[1].id);
@@ -145,6 +160,16 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
   const draggingObjRef = useRef<{ id: string } | null>(null);
 
   const current = history.present;
+
+  useEffect(() => {
+    if (!initialProject || initialProject.kind !== 'creative') return;
+    try {
+      const parsed = JSON.parse(initialProject.stateJson) as CreativeDesignState;
+      setHistory(createHistoryState<CreativeDesignState>(parsed));
+    } catch {
+      // Ignore malformed JSON
+    }
+  }, [initialProject]);
 
   const commit = useCallback((updater: (prev: CreativeDesignState) => CreativeDesignState) => {
     setHistory((prev) => pushHistory(prev, updater(cloneCreativeDesignState(prev.present))));
@@ -174,7 +199,37 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
       format,
       quality: exportQuality,
     });
-    onNotify(`Downloaded ${format.toUpperCase()} (${exportQuality}% quality) with zero watermark!`);
+    onNotify(t.notifications.downloaded);
+  };
+
+  const handleSaveToGallery = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    await savePhotoToDb({
+      title: `Creative · ${current.frameCaption || current.shapeId}`,
+      dataUrl: exportCanvasDataUrl(canvas, { format: 'png', quality: 95 }) || '',
+      source: 'creative',
+      format: 'png',
+      favorite: false,
+    });
+    await recordHistoryDb(
+      'template',
+      current.themeId || 'custom',
+      `Creative (${current.shapeId})`
+    );
+    onNotify(t.notifications.savedGallery);
+  };
+
+  const handleSaveProject = async () => {
+    const canvas = canvasRef.current;
+    const thumb = canvas ? exportCanvasDataUrl(canvas, { format: 'jpg', quality: 75 }) || '' : '';
+    await saveProjectToDb({
+      title: `Collection · ${current.frameCaption || 'Scrapbook'}`,
+      kind: 'creative',
+      thumbnailUrl: thumb,
+      stateJson: JSON.stringify(current),
+    });
+    onNotify(t.notifications.savedProject);
   };
 
   const handleReset = () => {
@@ -433,24 +488,22 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
       />
 
       {/* Top Studio Header & Custom Design Actions */}
-      <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+      <div className="rounded-3xl camcall-surface border p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
         <div className="shrink-0">
           <p className="text-xs font-semibold text-[#db2777]">CAMCALL Creative Collection</p>
-          <h1 className="font-display text-xl sm:text-2xl font-bold text-[#2d1b28]">
+          <h1 className="font-display text-xl sm:text-2xl font-bold">
             Custom Design &amp; Scrapbook Studio
           </h1>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {/* Mode Toggle */}
-          <div className="inline-flex p-1 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5]">
+          <div className="inline-flex p-1 rounded-xl camcall-surface-soft border">
             <button
               type="button"
               onClick={() => commit((prev) => ({ ...prev, mode: 'layout' }))}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                current.mode === 'layout'
-                  ? 'bg-[#db2777] text-white'
-                  : 'text-[#6e4f62] hover:text-[#2d1b28]'
+                current.mode === 'layout' ? 'bg-[#db2777] text-white' : 'opacity-80'
               }`}
             >
               Layout &amp; Shape
@@ -465,9 +518,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
                 }
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                current.mode === 'scrapbook'
-                  ? 'bg-[#7c3aed] text-white'
-                  : 'text-[#6e4f62] hover:text-[#2d1b28]'
+                current.mode === 'scrapbook' ? 'bg-[#7c3aed] text-white' : 'opacity-80'
               }`}
             >
               Scrapbook Studio
@@ -478,7 +529,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
             type="button"
             disabled={history.past.length === 0}
             onClick={() => setHistory((prev) => undoHistory(prev))}
-            className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-[#f3d5e5] disabled:opacity-40 text-xs font-semibold text-[#2d1b28] inline-flex items-center gap-1 cursor-pointer"
+            className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border disabled:opacity-40 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
           >
             <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Undo</span>
@@ -488,7 +539,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
             type="button"
             disabled={history.future.length === 0}
             onClick={() => setHistory((prev) => redoHistory(prev))}
-            className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-[#f3d5e5] disabled:opacity-40 text-xs font-semibold text-[#2d1b28] inline-flex items-center gap-1 cursor-pointer"
+            className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border disabled:opacity-40 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
           >
             <Redo2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Redo</span>
@@ -497,7 +548,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
           <button
             type="button"
             onClick={handleReset}
-            className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-[#f3d5e5] hover:border-rose-300 text-xs font-semibold text-[#6e4f62] hover:text-rose-600 inline-flex items-center gap-1 cursor-pointer"
+            className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border hover:border-rose-300 text-xs font-semibold hover:text-rose-600 inline-flex items-center gap-1 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Reset</span>
@@ -505,8 +556,26 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
 
           <button
             type="button"
+            onClick={handleSaveProject}
+            className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border hover:border-[#7c3aed] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Save className="w-3.5 h-3.5 text-[#7c3aed]" aria-hidden="true" />
+            <span>{t.creativeModes.saveProject}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSaveToGallery}
+            className="min-h-[40px] px-3 py-2 rounded-xl camcall-surface-soft border hover:border-[#db2777] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+          >
+            <FolderHeart className="w-3.5 h-3.5 text-[#db2777]" aria-hidden="true" />
+            <span>{t.creativeModes.saveGallery}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleOpenPreview}
-            className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#fdf2f8] border border-[#f3d5e5] hover:border-[#db2777] text-xs font-semibold text-[#db2777] inline-flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[40px] px-3.5 py-2 rounded-xl camcall-surface-soft border hover:border-[#db2777] text-xs font-semibold text-[#db2777] inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Preview</span>
@@ -518,7 +587,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
             className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Download PNG</span>
+            <span>PNG</span>
           </button>
 
           <button
@@ -527,7 +596,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
             className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Download JPG</span>
+            <span>JPG</span>
           </button>
         </div>
       </div>
@@ -536,8 +605,8 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Live Interactive Canvas & Slot Photos */}
         <div className="lg:col-span-6 flex flex-col gap-4">
-          <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
-            <div className="rounded-2xl bg-[#fdf2f8] border border-[#f3d5e5] p-3 flex items-center justify-center min-h-[340px] max-h-[580px]">
+          <div className="rounded-3xl camcall-surface border p-4 shadow-sm shadow-pink-950/5 flex flex-col gap-3">
+            <div className="rounded-2xl camcall-surface-soft border p-3 flex items-center justify-center min-h-[340px] max-h-[580px]">
               <canvas
                 ref={canvasRef}
                 data-testid="creative-collection-canvas"
@@ -549,7 +618,7 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
               />
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#6e4f62]">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs opacity-80">
               <span>Drag stickers, text, tape, or scrapbook photos directly on canvas</span>
               <div className="flex items-center gap-2">
                 <label htmlFor="creative-export-quality" className="font-medium">
@@ -565,46 +634,60 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
                   onChange={(e) => setExportQuality(Number(e.target.value))}
                   className="studio-slider w-24"
                 />
-                <span className="font-mono tabular-nums font-semibold text-[#2d1b28]">
-                  {exportQuality}%
-                </span>
+                <span className="font-mono tabular-nums font-semibold">{exportQuality}%</span>
               </div>
             </div>
           </div>
 
           {/* Layout Photos Manager (visible in layout mode) */}
           {current.mode === 'layout' && (
-            <div className="rounded-3xl bg-white border border-[#f3d5e5] p-4 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-sm font-bold text-[#2d1b28]">
+            <div className="rounded-3xl camcall-surface border p-4 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-display text-sm font-bold">
                   Layout Photos ({activeLayout.name} · {activeLayout.photoCount} slots)
                 </h2>
-                <span className="text-xs text-[#6e4f62]">Click any slot to upload photo</span>
+                <button
+                  type="button"
+                  onClick={() => setCameraModalTarget({ kind: 'slot', index: 0 })}
+                  className="px-3 py-1.5 rounded-xl bg-[#db2777] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{t.camera.captureFromCamera}</span>
+                </button>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {Array.from({ length: activeLayout.photoCount }, (_, idx) => {
                   const src = current.layoutPhotos[idx] || DEFAULT_SAMPLE_SRCS[idx % DEFAULT_SAMPLE_SRCS.length];
                   return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        targetSlotRef.current = idx;
-                        slotUploadRef.current?.click();
-                      }}
-                      className="group relative aspect-square rounded-xl overflow-hidden border border-[#f3d5e5] hover:border-[#db2777] bg-[#fdf2f8] cursor-pointer"
-                      aria-label={`Upload photo for layout slot ${idx + 1}`}
-                    >
-                      <img
-                        src={src}
-                        alt={`Layout slot ${idx + 1}`}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute inset-x-0 bottom-0 py-1 bg-[#2d1b28]/70 text-white text-[10px] font-semibold text-center opacity-90 group-hover:bg-[#db2777]">
-                        Slot #{idx + 1}
-                      </span>
-                    </button>
+                    <div key={idx} className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          targetSlotRef.current = idx;
+                          slotUploadRef.current?.click();
+                        }}
+                        className="group relative aspect-square rounded-xl overflow-hidden border border-[#f3d5e5] hover:border-[#db2777] bg-[#fdf2f8] cursor-pointer"
+                        aria-label={`Upload photo for layout slot ${idx + 1}`}
+                      >
+                        <img
+                          src={src}
+                          alt={`Layout slot ${idx + 1}`}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute inset-x-0 bottom-0 py-1 bg-[#2d1b28]/70 text-white text-[10px] font-semibold text-center opacity-90 group-hover:bg-[#db2777]">
+                          Slot #{idx + 1}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCameraModalTarget({ kind: 'slot', index: idx })}
+                        className="py-1 rounded-lg camcall-surface-soft border text-[10px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Camera className="w-2.5 h-2.5 text-[#db2777]" />
+                        <span>Cam</span>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1295,6 +1378,14 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  onClick={() => setCameraModalTarget({ kind: 'scrapbook' })}
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" aria-hidden="true" />
+                  <span>{t.camera.captureFromCamera}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => scrapPhotoUploadRef.current?.click()}
                   className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                 >
@@ -1563,6 +1654,27 @@ export function CreativeCollectionStudio({ onNotify }: CreativeCollectionStudioP
           </div>,
           document.body
         )}
+
+      <LiveCameraCaptureModal
+        open={cameraModalTarget !== null}
+        title={t.camera.captureFromCamera}
+        onCapture={(dataUrl) => {
+          if (!cameraModalTarget) return;
+          if (cameraModalTarget.kind === 'scrapbook') {
+            handleAddScrapbookPhoto(dataUrl);
+            onNotify('Captured photo added to Scrapbook!');
+          } else {
+            const idx = cameraModalTarget.index;
+            commit((prev) => {
+              const nextPhotos = [...prev.layoutPhotos];
+              nextPhotos[idx] = dataUrl;
+              return { ...prev, layoutPhotos: nextPhotos };
+            });
+            onNotify(`Captured photo for slot #${idx + 1}!`);
+          }
+        }}
+        onClose={() => setCameraModalTarget(null)}
+      />
     </section>
   );
 }

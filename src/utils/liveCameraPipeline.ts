@@ -1,11 +1,13 @@
 import type {
+  BoothShapeId,
   CameraEffectId,
   CameraOverlayId,
   FaceAnchorSet,
   FaceFilterId,
 } from '../types/photobooth';
 import type { FilterConfig } from '../types/studio';
-import { clamp } from './imageProcessing';
+import { clamp, resolveFilterWithIntensity } from './imageProcessing';
+import { traceBoothFrameShape } from './photoboothRenderer';
 
 let cachedScratchCanvas: HTMLCanvasElement | null = null;
 function getScratchCanvas(width: number, height: number): HTMLCanvasElement | null {
@@ -116,10 +118,14 @@ export function drawFaceFiltersOnCanvas(
   activeFilters: FaceFilterId[],
   width: number,
   height: number,
-  timeSec: number
+  timeSec: number,
+  intensity = 100
 ) {
   if (activeFilters.length === 0 || anchorsList.length === 0) return;
+  const alphaScale = clamp(intensity / 100, 0.1, 1);
 
+  ctx.save();
+  ctx.globalAlpha = alphaScale;
   for (const face of anchorsList) {
     const pt = (p: { x: number; y: number }) => ({ x: p.x * width, y: p.y * height });
     const le = pt(face.leftEye);
@@ -651,11 +657,119 @@ export function drawFaceFiltersOnCanvas(
       ctx.restore();
     }
 
-    // Subtle temple ear sparkles when any ear filter is active
-    if (lEar.x > 0 && rEar.x > 0 && activeFilters.includes('fairy' as FaceFilterId)) {
-      // unused sentinel
+    if (activeFilters.includes('pink-ribbon')) {
+      ctx.save();
+      ctx.translate(earCenter.x + eyeSpan * 0.42, earCenter.y - eyeSpan * 0.14);
+      ctx.rotate(headRoll + 0.18);
+      ctx.fillStyle = '#F472B6';
+      ctx.strokeStyle = '#BE185D';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(-eyeSpan * 0.22, 0, eyeSpan * 0.22, eyeSpan * 0.13, -0.35, 0, Math.PI * 2);
+      ctx.ellipse(eyeSpan * 0.22, 0, eyeSpan * 0.22, eyeSpan * 0.13, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#DB2777';
+      ctx.beginPath();
+      ctx.arc(0, 0, eyeSpan * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (activeFilters.includes('butterfly-decor')) {
+      ctx.save();
+      ctx.translate(earCenter.x, earCenter.y - eyeSpan * 0.12);
+      ctx.rotate(headRoll);
+      const pts = [
+        [-eyeSpan * 0.65, eyeSpan * 0.1],
+        [0, -eyeSpan * 0.22],
+        [eyeSpan * 0.65, eyeSpan * 0.1],
+      ];
+      pts.forEach(([bx, by], idx) => {
+        const flap = 0.7 + 0.3 * Math.sin(timeSec * 6 + idx);
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.fillStyle = idx === 1 ? '#F472B6' : '#C084FC';
+        ctx.beginPath();
+        ctx.ellipse(-eyeSpan * 0.14 * flap, -eyeSpan * 0.04, eyeSpan * 0.16 * flap, eyeSpan * 0.11, -0.4, 0, Math.PI * 2);
+        ctx.ellipse(eyeSpan * 0.14 * flap, -eyeSpan * 0.04, eyeSpan * 0.16 * flap, eyeSpan * 0.11, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+      ctx.restore();
+    }
+
+    if (activeFilters.includes('funny-hat')) {
+      ctx.save();
+      ctx.translate(earCenter.x, earCenter.y - eyeSpan * 0.08);
+      ctx.rotate(headRoll);
+      ctx.fillStyle = '#EC4899';
+      ctx.strokeStyle = '#FDF2F8';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-eyeSpan * 0.45, 0);
+      ctx.lineTo(0, -eyeSpan * 0.95);
+      ctx.lineTo(eyeSpan * 0.45, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.beginPath();
+      ctx.arc(0, -eyeSpan * 0.98, eyeSpan * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (activeFilters.includes('korean-soft-face')) {
+      ctx.save();
+      const grad = ctx.createRadialGradient(
+        eyeMid.x,
+        nose.y,
+        eyeSpan * 0.2,
+        eyeMid.x,
+        nose.y,
+        eyeSpan * 1.9
+      );
+      grad.addColorStop(0, 'rgba(255, 240, 246, 0.28)');
+      grad.addColorStop(1, 'rgba(255, 240, 246, 0)');
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    if (activeFilters.includes('dreamy-face')) {
+      ctx.save();
+      const grad = ctx.createRadialGradient(
+        eyeMid.x,
+        nose.y,
+        eyeSpan * 0.3,
+        eyeMid.x,
+        nose.y,
+        eyeSpan * 2.1
+      );
+      grad.addColorStop(0, 'rgba(237, 233, 254, 0.28)');
+      grad.addColorStop(0.6, 'rgba(251, 207, 232, 0.22)');
+      grad.addColorStop(1, 'rgba(251, 207, 232, 0)');
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    if (activeFilters.includes('vintage-face')) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(180, 125, 78, 0.16)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    // Subtle temple ear anchor usage check
+    if (lEar.x < 0 && rEar.x < 0) {
+      // no-op
     }
   }
+  ctx.restore();
 }
 
 /**
@@ -827,11 +941,20 @@ export function applyLiveCameraEffects(
 ) {
   if (effects.length === 0) return;
 
-  // Motion Blur blending with previous frame
-  if (effects.includes('motion-blur') && prevFrameCanvas && prevFrameCanvas.width === width) {
+  // Motion Blur or Double Exposure blending with previous frame
+  if (
+    (effects.includes('motion-blur') || effects.includes('double-exposure')) &&
+    prevFrameCanvas &&
+    prevFrameCanvas.width === width
+  ) {
     ctx.save();
-    ctx.globalAlpha = 0.42;
-    ctx.drawImage(prevFrameCanvas, 0, 0, width, height);
+    ctx.globalAlpha = effects.includes('double-exposure') ? 0.34 : 0.42;
+    if (effects.includes('double-exposure')) {
+      ctx.globalCompositeOperation = 'screen';
+      ctx.drawImage(prevFrameCanvas, 10, -6, width, height);
+    } else {
+      ctx.drawImage(prevFrameCanvas, 0, 0, width, height);
+    }
     ctx.restore();
   }
 
@@ -1023,6 +1146,35 @@ export function applyLiveCameraEffects(
     ctx.restore();
   }
 
+  // Golden Light warm wash
+  if (effects.includes('golden-light')) {
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, 'rgba(251, 191, 36, 0.25)');
+    grad.addColorStop(0.5, 'rgba(251, 146, 60, 0.16)');
+    grad.addColorStop(1, 'rgba(244, 114, 182, 0.18)');
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
+  // Glitch horizontal cyber slices
+  if (effects.includes('glitch-effect')) {
+    const scratch = getScratchCanvas(width, height);
+    const sctx = scratch?.getContext('2d');
+    if (scratch && sctx) {
+      sctx.clearRect(0, 0, width, height);
+      sctx.drawImage(ctx.canvas, 0, 0);
+      for (let i = 0; i < 6; i++) {
+        const sliceY = ((Math.sin(timeSec * 8 + i * 3.1) * 0.5 + 0.5) * (height - 24));
+        const sliceH = 8 + (i % 3) * 8;
+        const shiftX = Math.sin(timeSec * 14 + i * 2) * 14;
+        ctx.drawImage(scratch, 0, sliceY, width, sliceH, shiftX, sliceY, width, sliceH);
+      }
+    }
+  }
+
   // Timestamp Camera HUD
   if (effects.includes('timestamp')) {
     ctx.save();
@@ -1044,12 +1196,15 @@ export interface LiveRenderOptions {
   mirror: boolean;
   zoom: number;
   filter: FilterConfig | null;
+  filterIntensity?: number;
   activeEffects: CameraEffectId[];
   activeFaceFilters: FaceFilterId[];
+  faceIntensity?: number;
   activeOverlays: CameraOverlayId[];
   anchors: FaceAnchorSet[];
   timeSec: number;
   prevFrameCanvas?: HTMLCanvasElement | null;
+  previewShapeId?: BoothShapeId | null;
 }
 
 export function prepareCleanTrackingCanvas(
@@ -1125,12 +1280,15 @@ export function renderLiveCameraFrame(
     mirror,
     zoom,
     filter,
+    filterIntensity = 100,
     activeEffects,
     activeFaceFilters,
+    faceIntensity = 100,
     activeOverlays,
     anchors,
     timeSec,
     prevFrameCanvas,
+    previewShapeId = null,
   } = options;
 
   const srcW =
@@ -1175,9 +1333,11 @@ export function renderLiveCameraFrame(
   const sx = (srcW - zoomedW) / 2;
   const sy = (srcH - zoomedH) / 2;
 
+  const resolvedFilter = filter ? resolveFilterWithIntensity(filter, filterIntensity) : null;
+
   ctx.save();
-  if (filter) {
-    ctx.filter = `brightness(${filter.brightness}) contrast(${filter.contrast}) saturate(${filter.saturation}) sepia(${filter.sepia}) hue-rotate(${filter.hueRotate}deg)`;
+  if (resolvedFilter && filterIntensity > 0) {
+    ctx.filter = `brightness(${resolvedFilter.brightness}) contrast(${resolvedFilter.contrast}) saturate(${resolvedFilter.saturation}) sepia(${resolvedFilter.sepia}) hue-rotate(${resolvedFilter.hueRotate}deg)`;
   } else {
     ctx.filter = 'none';
   }
@@ -1189,15 +1349,15 @@ export function renderLiveCameraFrame(
   ctx.restore();
 
   // Subtle pink/lavender studio tint from FilterConfig
-  if (filter && (filter.pinkTint > 0.02 || filter.lavenderTint > 0.02)) {
+  if (resolvedFilter && (resolvedFilter.pinkTint > 0.02 || resolvedFilter.lavenderTint > 0.02)) {
     ctx.save();
     ctx.globalCompositeOperation = 'soft-light';
-    if (filter.pinkTint > 0.02) {
-      ctx.fillStyle = `rgba(244, 114, 182, ${clamp(filter.pinkTint * 0.8, 0, 0.35)})`;
+    if (resolvedFilter.pinkTint > 0.02) {
+      ctx.fillStyle = `rgba(244, 114, 182, ${clamp(resolvedFilter.pinkTint * 0.8, 0, 0.35)})`;
       ctx.fillRect(0, 0, outW, outH);
     }
-    if (filter.lavenderTint > 0.02) {
-      ctx.fillStyle = `rgba(167, 139, 250, ${clamp(filter.lavenderTint * 0.8, 0, 0.35)})`;
+    if (resolvedFilter.lavenderTint > 0.02) {
+      ctx.fillStyle = `rgba(167, 139, 250, ${clamp(resolvedFilter.lavenderTint * 0.8, 0, 0.35)})`;
       ctx.fillRect(0, 0, outW, outH);
     }
     ctx.restore();
@@ -1207,12 +1367,33 @@ export function renderLiveCameraFrame(
   applyLiveCameraEffects(ctx, activeEffects, outW, outH, timeSec, prevFrameCanvas);
 
   // Real-time Face AR Filters
-  drawFaceFiltersOnCanvas(ctx, anchors, activeFaceFilters, outW, outH, timeSec);
+  drawFaceFiltersOnCanvas(ctx, anchors, activeFaceFilters, outW, outH, timeSec, faceIntensity);
 
   // Real-time Camera Overlays
   drawCameraOverlaysOnCanvas(ctx, activeOverlays, outW, outH, timeSec);
 
-  // Store previous frame for motion blur
+  // Optional Live Photo Frame Shape Guide / Mask when capturing in Frame Shape mode
+  if (previewShapeId && previewShapeId !== 'rectangle' && previewShapeId !== 'square') {
+    const pad = Math.round(Math.min(outW, outH) * 0.06);
+    const fx = pad;
+    const fy = pad;
+    const fw = outW - pad * 2;
+    const fh = outH - pad * 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, outW, outH);
+    traceBoothFrameShape(ctx, previewShapeId, fx + fw / 2, fy + fh / 2, fw, fh);
+    ctx.fillStyle = 'rgba(253, 242, 248, 0.58)';
+    ctx.fill('evenodd');
+
+    traceBoothFrameShape(ctx, previewShapeId, fx + fw / 2, fy + fh / 2, fw, fh);
+    ctx.strokeStyle = '#DB2777';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Store previous frame for motion blur & double exposure
   if (prevFrameCanvas) {
     if (prevFrameCanvas.width !== outW || prevFrameCanvas.height !== outH) {
       prevFrameCanvas.width = outW;

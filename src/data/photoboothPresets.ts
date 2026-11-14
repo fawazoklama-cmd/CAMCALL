@@ -830,9 +830,18 @@ export const CAMERA_EFFECT_PRESETS: CameraEffectPreset[] = [
   { id: 'retro-digital', name: 'Retro Digital', description: '2004 digicam pixel crisp', badgeColor: '#93C5FD' },
   { id: 'old-camera', name: 'Old Camera Effect', description: 'Dust, sepia & vignette', badgeColor: '#E7D8CC' },
   { id: 'timestamp', name: 'Timestamp Camera', description: 'Amber camera date stamp', badgeColor: '#FDE68A' },
+  { id: 'golden-light', name: 'Golden Light', description: 'Warm sunset studio wash', badgeColor: '#FDBA74' },
+  { id: 'glitch-effect', name: 'Glitch Shift', description: 'Cyber Y2K digital slices', badgeColor: '#C084FC' },
+  { id: 'double-exposure', name: 'Double Exposure', description: 'Layered dreamy echo blend', badgeColor: '#F9A8D4' },
 ];
 
-export const FACE_FILTER_CATEGORIES: FaceFilterCategory[] = ['Animal', 'Cute', 'Fashion', 'Fun'];
+export const FACE_FILTER_CATEGORIES: FaceFilterCategory[] = [
+  'Animal',
+  'Cute',
+  'Fashion',
+  'Fun',
+  'Aesthetic',
+];
 
 export const FACE_FILTER_PRESETS: FaceFilterPreset[] = [
   // ANIMAL (6)
@@ -843,7 +852,9 @@ export const FACE_FILTER_PRESETS: FaceFilterPreset[] = [
   { id: 'deer-ears', name: 'Deer Ears', category: 'Animal', swatchColor: '#C2855B' },
   { id: 'fox-ears', name: 'Fox Ears', category: 'Animal', swatchColor: '#EA580C' },
 
-  // CUTE (8)
+  // CUTE (10)
+  { id: 'pink-ribbon', name: 'Pink Ribbon', category: 'Cute', swatchColor: '#DB2777' },
+  { id: 'butterfly-decor', name: 'Butterfly Crown', category: 'Cute', swatchColor: '#C084FC' },
   { id: 'pink-blush', name: 'Pink Blush', category: 'Cute', swatchColor: '#F472B6' },
   { id: 'heart-cheeks', name: 'Heart Cheeks', category: 'Cute', swatchColor: '#EC4899' },
   { id: 'freckles', name: 'Freckles', category: 'Cute', swatchColor: '#C2855B' },
@@ -861,12 +872,18 @@ export const FACE_FILTER_PRESETS: FaceFilterPreset[] = [
   { id: 'makeup-filter', name: 'Makeup Filter', category: 'Fashion', swatchColor: '#DB2777' },
   { id: 'lip-tint', name: 'Lip Tint', category: 'Fashion', swatchColor: '#E11D48' },
 
-  // FUN (5)
+  // FUN (6)
+  { id: 'funny-hat', name: 'Funny Party Hat', category: 'Fun', swatchColor: '#EC4899' },
   { id: 'funny-mustache', name: 'Funny Mustache', category: 'Fun', swatchColor: '#374151' },
   { id: 'big-glasses', name: 'Big Glasses', category: 'Fun', swatchColor: '#6366F1' },
   { id: 'cartoon-face', name: 'Cartoon Face', category: 'Fun', swatchColor: '#EC4899' },
   { id: 'rainbow-face', name: 'Rainbow Face', category: 'Fun', swatchColor: '#38BDF8' },
   { id: 'star-eyes', name: 'Star Eyes', category: 'Fun', swatchColor: '#FBBF24' },
+
+  // AESTHETIC (3)
+  { id: 'korean-soft-face', name: 'Korean Soft Glow', category: 'Aesthetic', swatchColor: '#FBCFE8' },
+  { id: 'dreamy-face', name: 'Dreamy Halo Face', category: 'Aesthetic', swatchColor: '#DDD6FE' },
+  { id: 'vintage-face', name: 'Vintage Film Face', category: 'Aesthetic', swatchColor: '#D6B89C' },
 ];
 
 export const CAMERA_OVERLAY_PRESETS: CameraOverlayPreset[] = [
@@ -882,13 +899,14 @@ export const CAMERA_OVERLAY_PRESETS: CameraOverlayPreset[] = [
 ];
 
 export const CAMERA_MODE_PRESETS: CameraModePreset[] = [
-  { id: 'photo', name: 'Photo Mode', description: 'Capture 1 styled frame' },
+  { id: 'photo', name: 'Normal Camera', description: 'Capture 1 styled frame' },
+  { id: 'photobooth', name: 'Photobooth Mode', description: 'Auto countdown 2–8 frames' },
   { id: 'burst', name: 'Burst Mode', description: 'Rapid multi-frame sequence' },
-  { id: 'photobooth', name: 'Photobooth Mode', description: 'Auto countdown full layout' },
   { id: 'mirror', name: 'Mirror Mode', description: 'True selfie mirror live view' },
   { id: 'timer', name: 'Timer Mode', description: '3s / 5s / 10s self-timer' },
-  { id: 'video', name: 'Video Mode', description: 'Record clip with live effects' },
-  { id: 'random', name: 'Random Mode', description: 'Surprise theme, AR & filter' },
+  { id: 'video', name: 'Video Mode', description: 'Record, pause & resume clip' },
+  { id: 'random', name: 'Random Camera', description: 'Surprise theme, AR & filter' },
+  { id: 'gesture', name: 'Gesture Camera', description: 'Smile or open mouth to snap' },
 ];
 
 export const BOOTH_ASPECT_RATIOS: BoothAspectRatio[] = ['1:1', '3:4', '4:3', '9:16', '16:9'];

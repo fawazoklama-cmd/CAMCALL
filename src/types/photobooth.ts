@@ -55,9 +55,12 @@ export type CameraEffectId =
   | 'motion-blur'
   | 'retro-digital'
   | 'old-camera'
-  | 'timestamp';
+  | 'timestamp'
+  | 'golden-light'
+  | 'glitch-effect'
+  | 'double-exposure';
 
-export type FaceFilterCategory = 'Animal' | 'Cute' | 'Fashion' | 'Fun';
+export type FaceFilterCategory = 'Animal' | 'Cute' | 'Fashion' | 'Fun' | 'Aesthetic';
 
 export type FaceFilterId =
   | 'bunny-ears'
@@ -66,6 +69,8 @@ export type FaceFilterId =
   | 'bear-ears'
   | 'deer-ears'
   | 'fox-ears'
+  | 'pink-ribbon'
+  | 'butterfly-decor'
   | 'pink-blush'
   | 'heart-cheeks'
   | 'freckles'
@@ -84,7 +89,11 @@ export type FaceFilterId =
   | 'big-glasses'
   | 'cartoon-face'
   | 'rainbow-face'
-  | 'star-eyes';
+  | 'star-eyes'
+  | 'funny-hat'
+  | 'korean-soft-face'
+  | 'dreamy-face'
+  | 'vintage-face';
 
 export type CameraOverlayId =
   | 'floating-hearts'
@@ -104,7 +113,8 @@ export type CameraModeId =
   | 'mirror'
   | 'timer'
   | 'video'
-  | 'random';
+  | 'random'
+  | 'gesture';
 
 export type BoothAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 
@@ -214,5 +224,6 @@ export interface FaceAnchorSet {
   faceHeight: number;
   headAngle: number;
   mouthOpen: number;
+  smileScore?: number;
   isTracked: boolean;
 }

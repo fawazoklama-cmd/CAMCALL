@@ -1,80 +1,285 @@
-import { Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, Menu, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useSettings } from '../context/SettingsContext';
+import type { CameraModeId, FaceFilterCategory } from '../types/photobooth';
 import type { StudioView } from '../types/studio';
+
+export type CreativeModeId =
+  | 'scrapbook'
+  | 'moodboard'
+  | 'magazine'
+  | 'polaroid'
+  | 'photocard'
+  | 'pfp'
+  | 'wallpaper'
+  | 'calendar'
+  | 'journal'
+  | 'gif'
+  | 'slideshow'
+  | 'idcard';
+
+export interface StudioNavigationPayload {
+  view: StudioView;
+  cameraMode?: CameraModeId;
+  boothTab?: 'modes' | 'themes' | 'layouts' | 'shapes' | 'effects' | 'face-ar' | 'overlays' | 'decorate';
+  faceCategory?: FaceFilterCategory;
+  creativeMode?: CreativeModeId;
+}
 
 interface NavbarProps {
   activeView: StudioView;
-  onNavigate: (view: StudioView) => void;
+  onNavigate: (view: StudioView, payload?: Partial<StudioNavigationPayload>) => void;
 }
 
-const NAV_ITEMS: { id: StudioView; label: string }[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'photobooth', label: 'Photobooth' },
-  { id: 'filters', label: 'Filters' },
-  { id: 'editor', label: 'Photo Editor' },
-  { id: 'collage', label: 'Collage' },
-  { id: 'creative', label: 'Creative' },
-  { id: 'about', label: 'About' },
-];
+type DropdownId = 'camera' | 'face' | 'creative' | null;
 
 export function Navbar({ activeView, onNavigate }: NavbarProps) {
+  const { t, lang, setLanguage } = useSettings();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<DropdownId>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
-  const handleSelect = (view: StudioView) => {
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const handleSelect = (view: StudioView, payload?: Partial<StudioNavigationPayload>) => {
     setMobileOpen(false);
-    onNavigate(view);
+    setOpenMenu(null);
+    onNavigate(view, payload);
   };
 
+  const cameraItems: { label: string; mode: CameraModeId }[] = [
+    { label: t.nav.normalCamera, mode: 'photo' },
+    { label: t.nav.photobooth, mode: 'photobooth' },
+    { label: t.nav.burstMode, mode: 'burst' },
+    { label: t.nav.mirrorMode, mode: 'mirror' },
+    { label: t.nav.timerMode, mode: 'timer' },
+    { label: t.nav.videoMode, mode: 'video' },
+    { label: t.nav.randomMode, mode: 'random' },
+    { label: t.nav.gestureMode, mode: 'gesture' },
+  ];
+
+  const faceItems: { label: string; category: FaceFilterCategory }[] = [
+    { label: t.nav.cuteFilters, category: 'Cute' },
+    { label: t.nav.animalFilters, category: 'Animal' },
+    { label: t.nav.aestheticFilters, category: 'Aesthetic' },
+    { label: t.nav.funnyFilters, category: 'Fun' },
+  ];
+
+  const creativeItems: {
+    label: string;
+    view: StudioView;
+    creativeMode?: CreativeModeId;
+  }[] = [
+    { label: t.nav.photoEditor, view: 'editor' },
+    { label: t.nav.collageMaker, view: 'collage' },
+    { label: t.nav.creativeCollection, view: 'creative' },
+    { label: t.nav.scrapbook, view: 'creative' },
+    { label: t.nav.magazineCover, view: 'creative-modes', creativeMode: 'magazine' },
+    { label: t.nav.polaroidMaker, view: 'creative-modes', creativeMode: 'polaroid' },
+    { label: t.nav.gifMaker, view: 'creative-modes', creativeMode: 'gif' },
+    { label: t.nav.wallpaperMaker, view: 'creative-modes', creativeMode: 'wallpaper' },
+    { label: t.nav.photoCardMaker, view: 'creative-modes', creativeMode: 'photocard' },
+    { label: t.nav.allCreativeModes, view: 'creative-modes', creativeMode: 'moodboard' },
+  ];
+
   return (
-    <header className="sticky top-0 z-40 bg-[#fffdfe]/90 backdrop-blur-md border-b border-[#f3d5e5]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
-        {/* Zone 1: Brand Wordmark (Single clean text element) */}
+    <header
+      ref={navRef}
+      className="sticky top-0 z-40 camcall-surface border-b backdrop-blur-md"
+      style={{
+        backgroundColor: 'color-mix(in srgb, var(--camcall-surface) 92%, transparent)',
+      }}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
+        {/* Zone 1: Brand Wordmark */}
         <a
           href="#home"
           onClick={(e) => {
             e.preventDefault();
             handleSelect('home');
           }}
-          className="font-display text-2xl font-bold tracking-tight text-[#2d1b28] hover:text-[#db2777] transition-colors whitespace-nowrap shrink-0"
+          className="font-display text-2xl font-bold tracking-tight hover:text-[#db2777] transition-colors whitespace-nowrap shrink-0"
         >
-          CAMCALL
+          {t.brand.name}
         </a>
 
-        {/* Zone 2: Clean single-line text links */}
-        <nav aria-label="Primary" className="hidden lg:flex items-center gap-6">
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeView === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleSelect(item.id)}
-                className={`relative py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  isActive
-                    ? 'text-[#db2777]'
-                    : 'text-[#6e4f62] hover:text-[#2d1b28]'
-                }`}
-              >
-                {item.label}
-                <span
-                  aria-hidden="true"
-                  className={`absolute left-0 right-0 -bottom-0.5 h-0.5 rounded-full bg-[#db2777] transition-transform duration-200 origin-left ${
-                    isActive ? 'scale-x-100' : 'scale-x-0'
-                  }`}
-                />
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Zone 3: Single Primary Action + Mobile Menu Trigger */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Zone 2: Clean Desktop Navigation Links */}
+        <nav aria-label="Primary" className="hidden lg:flex items-center gap-5">
           <button
             type="button"
-            onClick={() => handleSelect('photobooth')}
-            className="px-4 sm:px-5 py-2.5 rounded-xl bg-[#db2777] hover:bg-[#be185d] text-white text-xs sm:text-sm font-semibold tracking-wide shadow-sm shadow-pink-500/20 transition-all active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
+            onClick={() => handleSelect('home')}
+            className={`relative py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeView === 'home' ? 'text-[#db2777]' : 'opacity-80 hover:opacity-100'
+            }`}
           >
-            START CREATING
+            {t.nav.home}
+          </button>
+
+          {/* Camera Studio Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-expanded={openMenu === 'camera'}
+              onClick={() => setOpenMenu((m) => (m === 'camera' ? null : 'camera'))}
+              className={`py-1 text-sm font-medium inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'photobooth' ? 'text-[#db2777]' : 'opacity-80 hover:opacity-100'
+              }`}
+            >
+              <span>{t.nav.cameraStudio}</span>
+              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            {openMenu === 'camera' && (
+              <div className="absolute left-0 top-full mt-2 w-52 rounded-2xl camcall-surface border shadow-xl p-1.5 z-50 flex flex-col gap-0.5">
+                {cameraItems.map((item) => (
+                  <button
+                    key={item.mode}
+                    type="button"
+                    onClick={() =>
+                      handleSelect('photobooth', {
+                        cameraMode: item.mode,
+                        boothTab: 'modes',
+                      })
+                    }
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-medium hover:bg-[#fce7f3] hover:text-[#be185d] transition-colors cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Face Studio Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-expanded={openMenu === 'face'}
+              onClick={() => setOpenMenu((m) => (m === 'face' ? null : 'face'))}
+              className="py-1 text-sm font-medium inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 opacity-80 hover:opacity-100 cursor-pointer"
+            >
+              <span>{t.nav.faceStudio}</span>
+              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            {openMenu === 'face' && (
+              <div className="absolute left-0 top-full mt-2 w-48 rounded-2xl camcall-surface border shadow-xl p-1.5 z-50 flex flex-col gap-0.5">
+                {faceItems.map((item) => (
+                  <button
+                    key={item.category}
+                    type="button"
+                    onClick={() =>
+                      handleSelect('photobooth', {
+                        boothTab: 'face-ar',
+                        faceCategory: item.category,
+                      })
+                    }
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-medium hover:bg-[#fce7f3] hover:text-[#be185d] transition-colors cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('filters')}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-[#7c3aed] hover:bg-[#ede9fe] transition-colors cursor-pointer border-t mt-1 pt-2"
+                >
+                  {t.nav.filters}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Creative Studio Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-expanded={openMenu === 'creative'}
+              onClick={() => setOpenMenu((m) => (m === 'creative' ? null : 'creative'))}
+              className={`py-1 text-sm font-medium inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeView === 'editor' ||
+                activeView === 'collage' ||
+                activeView === 'creative' ||
+                activeView === 'creative-modes'
+                  ? 'text-[#db2777]'
+                  : 'opacity-80 hover:opacity-100'
+              }`}
+            >
+              <span>{t.nav.creativeStudio}</span>
+              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            {openMenu === 'creative' && (
+              <div className="absolute left-0 top-full mt-2 w-56 rounded-2xl camcall-surface border shadow-xl p-1.5 z-50 grid grid-cols-1 gap-0.5">
+                {creativeItems.map((item, idx) => (
+                  <button
+                    key={`${item.view}-${item.creativeMode || idx}`}
+                    type="button"
+                    onClick={() =>
+                      handleSelect(item.view, { creativeMode: item.creativeMode })
+                    }
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-medium hover:bg-[#fce7f3] hover:text-[#be185d] transition-colors cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleSelect('templates')}
+            className={`py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeView === 'templates' ? 'text-[#db2777]' : 'opacity-80 hover:opacity-100'
+            }`}
+          >
+            {t.nav.templates}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelect('gallery')}
+            className={`py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeView === 'gallery' ? 'text-[#db2777]' : 'opacity-80 hover:opacity-100'
+            }`}
+          >
+            {t.nav.gallery}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelect('settings')}
+            className={`py-1 text-sm font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeView === 'settings' ? 'text-[#db2777]' : 'opacity-80 hover:opacity-100'
+            }`}
+          >
+            {t.nav.settings}
+          </button>
+        </nav>
+
+        {/* Zone 3: Primary CTA + Mobile Menu */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setLanguage(lang === 'en' ? 'id' : 'en')}
+            aria-label={lang === 'en' ? 'Switch to Bahasa Indonesia' : 'Switch to English'}
+            className="hidden sm:inline-flex min-h-[38px] px-2.5 py-1.5 rounded-xl camcall-surface-soft border text-xs font-semibold cursor-pointer whitespace-nowrap"
+          >
+            {lang === 'id' ? '🇮🇩 ID' : '🇬🇧 EN'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSelect('photobooth', { cameraMode: 'photobooth' })}
+            className="px-4 sm:px-5 py-2.5 rounded-xl camcall-btn-primary text-xs sm:text-sm font-semibold tracking-wide shadow-sm transition-all active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            {t.nav.startCreating}
           </button>
 
           <button
@@ -82,7 +287,7 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
             onClick={() => setMobileOpen((prev) => !prev)}
             aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileOpen}
-            className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border border-[#f3d5e5] text-[#2d1b28] hover:bg-[#fdf2f8] transition-colors"
+            className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border camcall-surface-soft transition-colors"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -93,25 +298,59 @@ export function Navbar({ activeView, onNavigate }: NavbarProps) {
       {mobileOpen && (
         <nav
           aria-label="Mobile"
-          className="lg:hidden border-t border-[#f3d5e5] bg-[#fffdfe] px-4 py-3 flex flex-col gap-1"
+          className="lg:hidden border-t camcall-surface px-4 py-3 flex flex-col gap-1 max-h-[75vh] overflow-y-auto"
         >
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeView === item.id;
+          {(
+            [
+              { label: t.nav.home, view: 'home' as StudioView },
+              { label: t.nav.photobooth, view: 'photobooth' as StudioView },
+              { label: t.nav.filters, view: 'filters' as StudioView },
+              { label: t.nav.photoEditor, view: 'editor' as StudioView },
+              { label: t.nav.collageMaker, view: 'collage' as StudioView },
+              { label: t.nav.allCreativeModes, view: 'creative-modes' as StudioView },
+              { label: t.nav.creativeCollection, view: 'creative' as StudioView },
+              { label: t.nav.templates, view: 'templates' as StudioView },
+              { label: t.nav.gallery, view: 'gallery' as StudioView },
+              { label: t.nav.settings, view: 'settings' as StudioView },
+            ]
+          ).map((item) => {
+            const isActive = activeView === item.view;
             return (
               <button
-                key={item.id}
+                key={item.view}
                 type="button"
-                onClick={() => handleSelect(item.id)}
+                onClick={() => handleSelect(item.view)}
                 className={`w-full text-left px-3 py-3 rounded-xl text-sm font-medium transition-colors min-h-[44px] ${
-                  isActive
-                    ? 'bg-[#fce7f3] text-[#be185d]'
-                    : 'text-[#2d1b28] hover:bg-[#fdf2f8]'
+                  isActive ? 'bg-[#fce7f3] text-[#be185d]' : 'hover:bg-[#fdf2f8]/60'
                 }`}
               >
                 {item.label}
               </button>
             );
           })}
+          <div className="pt-2 border-t flex items-center justify-between">
+            <span className="text-xs opacity-75">{t.settings.languageLabel}</span>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setLanguage('id')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                  lang === 'id' ? 'bg-[#db2777] text-white' : 'camcall-surface-soft border'
+                }`}
+              >
+                🇮🇩 ID
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                  lang === 'en' ? 'bg-[#db2777] text-white' : 'camcall-surface-soft border'
+                }`}
+              >
+                🇬🇧 EN
+              </button>
+            </div>
+          </div>
         </nav>
       )}
     </header>
